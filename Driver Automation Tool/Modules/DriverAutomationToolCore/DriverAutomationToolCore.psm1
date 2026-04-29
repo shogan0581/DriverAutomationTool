@@ -651,7 +651,7 @@ function Get-DATOEMModelInfo {
                             Baseboards = $(if ($sysIds) { $sysIds -join "," } else { "" })
                             OS         = $WindowsVersion
                             'OS Build' = $WindowsBuild
-                            Version    = (Get-Date -Format 'ddMMyyyy')
+                            Version    = (Get-Date -Format 'yyyyMMdd')
                         }
                     }
                 } catch {
@@ -847,7 +847,7 @@ function Get-DATOEMModelInfo {
                             Baseboards = $Model
                             OS         = $WindowsVersion
                             'OS Build' = $WindowsBuild
-                            Version    = (Get-Date -Format 'ddMMyyyy')
+                            Version    = (Get-Date -Format 'yyyyMMdd')
                         }
                     }
                 } catch {
@@ -3234,7 +3234,7 @@ function Start-DATModelProcessing {
                         # Update cached app list so subsequent iterations detect this package
                         if ($null -ne $intuneResult -and -not [string]::IsNullOrEmpty($intuneResult.AppId) -and -not $intuneResult.Skipped) {
                             $driverDisplayName = "$driverNamePrefix - $oem $modelName - $windowsVersion $windowsBuild $arch"
-                            $driverCacheVersion = if (-not [string]::IsNullOrEmpty($catalogDriverVersion)) { $catalogDriverVersion } else { Get-Date -Format "ddMMyyyy" }
+                            $driverCacheVersion = if (-not [string]::IsNullOrEmpty($catalogDriverVersion)) { $catalogDriverVersion } else { Get-Date -Format "yyyyMMdd" }
                             $cachedIntuneApps += [PSCustomObject]@{
                                 id             = $intuneResult.AppId
                                 displayName    = $driverDisplayName
@@ -3318,7 +3318,7 @@ function Start-DATModelProcessing {
                             Write-DATLogEntry -Value "-- Site code: $SiteCode" -Severity 1
                             Set-DATRegistryValue -Name "RunningMessage" -Value "Creating ConfigMgr driver package: $oem $modelName..." -Type String
 
-                            $version = if (-not [string]::IsNullOrEmpty($catalogVersion)) { "$catalogVersion" } elseif (-not [string]::IsNullOrEmpty($catalogDriverVersion)) { "$catalogDriverVersion" } else { Get-Date -Format "ddMMyyyy" }
+                            $version = if (-not [string]::IsNullOrEmpty($catalogVersion)) { "$catalogVersion" } elseif (-not [string]::IsNullOrEmpty($catalogDriverVersion)) { "$catalogDriverVersion" } else { Get-Date -Format "yyyyMMdd" }
                             $cmParams = @{
                                 DriverPackage = $wimPath
                                 OEM           = $oem
@@ -3634,7 +3634,7 @@ function Start-DATModelProcessing {
                                     $processedBiosModels["$oem|$modelName"] = $biosIntuneResult.AppId
                                     if (-not $biosIntuneResult.Skipped) {
                                         $biosDisplayName = "$biosNamePrefix - $oem $modelName - $arch"
-                                        $biosCacheVersion = if (-not [string]::IsNullOrEmpty($biosEntry.Version)) { $biosEntry.Version } else { Get-Date -Format "ddMMyyyy" }
+                                        $biosCacheVersion = if (-not [string]::IsNullOrEmpty($biosEntry.Version)) { $biosEntry.Version } else { Get-Date -Format "yyyyMMdd" }
                                         $cachedIntuneApps += [PSCustomObject]@{
                                             id             = $biosIntuneResult.AppId
                                             displayName    = $biosDisplayName
@@ -8030,7 +8030,7 @@ function New-DATIntuneRequirementScript {
         - Device manufacturer matches the OEM
         - WMI SystemSKU or Baseboard Product matches one of the model's values
         - OS matches the target OS (Drivers only -- BIOS packages are OS-agnostic)
-        - Package version is newer than any previously installed version (ddMMyyyy comparison)
+        - Package version is newer than any previously installed version (yyyyMMdd comparison)
     #>
     [CmdletBinding()]
     param (
@@ -8097,7 +8097,7 @@ function New-DATIntuneRequirementScript {
 "@
     } elseif ($UpdateType -eq 'BIOS') {
         # BIOS without a catalog release date -- registry exact-match only
-        # (ddMMyyyy parsing is not valid for OEM BIOS version strings like M43KT32A)
+        # (yyyyMMdd parsing is not valid for OEM BIOS version strings like M43KT32A)
         @"
     # Check 4: BIOS version check - registry exact match
     `$regPath = "HKLM:\SOFTWARE\DriverAutomationTool\$regSubKey\$OEM\$Model"
@@ -9048,7 +9048,7 @@ function Invoke-DATIntunePackageCreation {
 
     # Use the supplied version (e.g. BIOS catalog version) if available, otherwise fall back to date
     if ([string]::IsNullOrEmpty($Version)) {
-        $version = Get-Date -Format "ddMMyyyy"
+        $version = Get-Date -Format "yyyyMMdd"
     } else {
         $version = $Version
     }
