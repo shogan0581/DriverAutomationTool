@@ -9894,20 +9894,24 @@ function Send-DATFeedback {
 function Get-DATPackageHash {
     <#
     .SYNOPSIS
-        Computes the MD5 hash of a file. Returns the hex string, or $null on failure.
+        Computes the MD5 hash of a file or largest file in path. Returns a string castable custom object or $null on failure.
     #>
     [CmdletBinding()]
-    [OutputType([string])]
     param (
         [Parameter(Mandatory)][string]$FilePath
     )
     if (-not (Test-Path -LiteralPath $FilePath)) { return $null }
+    $type = if (-not [string]::IsNullOrEmpty($MyInvocation.MyCommand.Noun)) { $MyInvocation.MyCommand.Noun } else { 'HashObject' }
+    Update-TypeData -TypeName $type -MemberType ScriptMethod -MemberName ToString -Value {$this.String} -Force
+    $file = if (Test-Path -Path $FilePath -PathType Container) { Get-ChildItem $FilePath -File | Sort-Object Length | Select-Object -Last 1 } else { Get-Item $FilePath }
+    $object = [PSCustomObject]@{PSTypeName=$type;File=$file.FullName;Size=$file.Length;Bytes=$null;String=$null;}
     try {
         $md5 = [System.Security.Cryptography.MD5]::Create()
-        $stream = [System.IO.File]::OpenRead($FilePath)
+        $stream = [System.IO.File]::OpenRead($file.FullName)
         try {
-            $hashBytes = $md5.ComputeHash($stream)
-            return [BitConverter]::ToString($hashBytes).Replace('-', '')
+            $object.Bytes = $md5.ComputeHash($stream)
+            $object.String = [BitConverter]::ToString($object.Bytes).Replace('-', '')
+            return $object
         } finally {
             $stream.Close()
             $md5.Dispose()
