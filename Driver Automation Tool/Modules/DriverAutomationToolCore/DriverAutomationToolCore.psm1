@@ -1425,7 +1425,7 @@ function Invoke-DATDriverFilePackaging {
     # ensures temp files are cleaned up automatically.  Also handles UNC destinations
     # since DISM cannot create WIMs on network shares.
     $localWorkDir = Join-Path $global:TempDirectory "Build\$OEM\$Model"
-    if (Test-Path $localWorkDir) { Remove-Item $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue }
+    #if (Test-Path $localWorkDir) { Remove-Item $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue } # Disabled in favor of pre-flights/troubleshooting/UI-setting
     New-Item -Path $localWorkDir -ItemType Directory -Force | Out-Null
     Write-DATLogEntry -Value "[$OEM] Using local temp working directory: $localWorkDir" -Severity 1
 
@@ -1835,7 +1835,8 @@ function Invoke-DATDriverFilePackaging {
                             Write-DATLogEntry -Value "[$OEM] wimlib: $line" -Severity 1
                         }
                     }
-                    Remove-Item $wimlibStdout -Force -ErrorAction SilentlyContinue
+                    # Disabled in favor of pre-flights/troubleshooting/UI-setting
+                    #Remove-Item $wimlibStdout -Force -ErrorAction SilentlyContinue
                 }
                 if (Test-Path $wimlibStderr) {
                     $stderrContent = Get-Content $wimlibStderr -ErrorAction SilentlyContinue
@@ -1844,7 +1845,8 @@ function Invoke-DATDriverFilePackaging {
                             Write-DATLogEntry -Value "[$OEM] wimlib error: $line" -Severity 2
                         }
                     }
-                    Remove-Item $wimlibStderr -Force -ErrorAction SilentlyContinue
+                    # Disabled in favor of pre-flights/troubleshooting/UI-setting
+                    #Remove-Item $wimlibStderr -Force -ErrorAction SilentlyContinue
                 }
 
                 $totalTime = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
@@ -1884,7 +1886,8 @@ function Invoke-DATDriverFilePackaging {
                             Write-DATLogEntry -Value "[$OEM] 7zip: $line" -Severity 1
                         }
                     }
-                    Remove-Item $7zipStdout -Force -ErrorAction SilentlyContinue
+                    # Disabled in favor of pre-flights/troubleshooting/UI-setting
+                    #Remove-Item $7zipStdout -Force -ErrorAction SilentlyContinue
                 }
                 if (Test-Path $7zipStderr) {
                     $stderrContent = Get-Content $7zipStderr -ErrorAction SilentlyContinue
@@ -1893,7 +1896,8 @@ function Invoke-DATDriverFilePackaging {
                             Write-DATLogEntry -Value "[$OEM] 7zip error: $line" -Severity 2
                         }
                     }
-                    Remove-Item $7zipStderr -Force -ErrorAction SilentlyContinue
+                    # Disabled in favor of pre-flights/troubleshooting/UI-setting
+                    #Remove-Item $7zipStderr -Force -ErrorAction SilentlyContinue
                 }
 
                 $totalTime = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
@@ -1984,12 +1988,13 @@ function Invoke-DATDriverFilePackaging {
                             Write-DATLogEntry -Value "[$OEM] DISM: $line" -Severity 1
                         }
                     }
-                    Remove-Item $dismStdoutFile -Force -ErrorAction SilentlyContinue
+                    # Disabled in favor of pre-flights/troubleshooting/UI-setting
+                    #Remove-Item $dismStdoutFile -Force -ErrorAction SilentlyContinue
                 }
 
-                # Clean up batch file
-                Remove-Item $dismBatchFile -Force -ErrorAction SilentlyContinue
-                Remove-Item $dismLogFile -Force -ErrorAction SilentlyContinue
+                # Clean up batch file (Disabled in favor of pre-flights/troubleshooting/UI-setting)
+                #Remove-Item $dismBatchFile -Force -ErrorAction SilentlyContinue
+                #Remove-Item $dismLogFile -Force -ErrorAction SilentlyContinue
 
                 $totalTime = [math]::Round(((Get-Date) - $startTime).TotalSeconds)
                 Write-DATLogEntry -Value "[$OEM] dism.exe /Capture-Image completed with code $effectiveExitCode after ${totalTime}s" -Severity 1 -UpdateUI
@@ -2011,9 +2016,9 @@ function Invoke-DATDriverFilePackaging {
                 Write-DATLogEntry -Value "[$OEM] WIM staged in temp directory successfully" -Severity 1
                 $WimFile = $destWimFile
 
-                # Clean up local temp working directory (extracted files + temp WIM)
-                Remove-Item -Path $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue
-                Write-DATLogEntry -Value "[$OEM] Temp working directory cleaned up: $localWorkDir" -Severity 1
+                # Clean up local temp working directory (extracted files + temp WIM) (Disabled in favor of pre-flights/troubleshooting/UI-setting)
+                #Remove-Item -Path $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+                #Write-DATLogEntry -Value "[$OEM] Temp working directory cleaned up: $localWorkDir" -Severity 1
 
                 $wimSize = [math]::Round((Get-Item $WimFile).Length / 1MB, 2)
                 Set-DATRegistryValue -Name "PackagedDriverPath" -Value "$WimFile" -Type String
@@ -2038,11 +2043,11 @@ function Invoke-DATDriverFilePackaging {
                 Write-DATLogEntry -Value "[Error] - WIM creation failed: $($_.Exception.Message)" -Severity 3 -UpdateUI
                 Set-DATRegistryValue -Name "RunningMessage" -Value "WIM creation error - $OEM $Model" -Type String
             }
-            # Clean up temp working directory on failure
-            if (Test-Path $localWorkDir) {
-                Remove-Item -Path $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue
-                Write-DATLogEntry -Value "[$OEM] Temp working directory cleaned up after failure" -Severity 2
-            }
+            # Clean up temp working directory on failure (Disabled in favor of pre-flights/troubleshooting/UI-setting)
+            #if (Test-Path $localWorkDir) {
+            #    Remove-Item -Path $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+            #    Write-DATLogEntry -Value "[$OEM] Temp working directory cleaned up after failure" -Severity 2
+            #}
             throw
         }
     }
@@ -3281,6 +3286,7 @@ function Start-DATModelProcessing {
                         }
 
                         # Clean up staging WIM now that it has been wrapped into .intunewin
+                        <#  Disabled in favor of pre-flights/troubleshooting/UI-setting
                         if (Test-Path $wimPath) {
                             Remove-Item -Path $wimPath -Force -ErrorAction SilentlyContinue
                             $wimParent = Split-Path $wimPath -Parent
@@ -3289,6 +3295,7 @@ function Start-DATModelProcessing {
                             }
                             Write-DATLogEntry -Value "[$oem] Staging WIM cleaned up after Intune upload" -Severity 1
                         }
+                        #>
                         $script:driverPipelineSuccess = $true
 
                         # Telemetry: driver report with .intunewin hash
@@ -3361,6 +3368,7 @@ function Start-DATModelProcessing {
                                 }
 
                                 # Clean up staging WIM now that it has been copied to the CM package source
+                                <# Disabled in favor of pre-flights/troubleshooting/UI-setting
                                 if (Test-Path $wimPath) {
                                     Remove-Item -Path $wimPath -Force -ErrorAction SilentlyContinue
                                     $wimParent = Split-Path $wimPath -Parent
@@ -3369,6 +3377,7 @@ function Start-DATModelProcessing {
                                     }
                                     Write-DATLogEntry -Value "[$oem] Staging WIM cleaned up after ConfigMgr package creation" -Severity 1
                                 }
+                                #>
                                 $script:driverPipelineSuccess = $true
                             } else {
                                 Write-DATLogEntry -Value "[Warning] - $oem $modelName ConfigMgr driver package creation failed" -Severity 2
@@ -3391,11 +3400,13 @@ function Start-DATModelProcessing {
                         Copy-Item -Path $wimStagingPath -Destination $wimFinalPath -Force
                         Write-DATLogEntry -Value "[$currentIndex/$totalModels] WIM package stored: $wimFinalPath" -Severity 1
                         # Clean up staging WIM
+                        <#  Disabled in favor of pre-flights/troubleshooting/UI-setting
                         Remove-Item -Path $wimStagingPath -Force -ErrorAction SilentlyContinue
                         $wimParent = Split-Path $wimStagingPath -Parent
                         if ((Test-Path $wimParent) -and @(Get-ChildItem -Path $wimParent -Force -ErrorAction SilentlyContinue).Count -eq 0) {
                             Remove-Item -Path $wimParent -Recurse -Force -ErrorAction SilentlyContinue
                         }
+                        #>
                         $script:driverPipelineSuccess = $true
                     }
                 }
@@ -3682,6 +3693,7 @@ function Start-DATModelProcessing {
                                 }
 
                                 # Clean up staging BIOS WIM now that it has been wrapped into .intunewin
+                                <# Disabled in favor of pre-flights/troubleshooting/UI-setting
                                 if ((Test-Path $biosPackagePath) -and $biosPackagePath -match '\.wim$') {
                                     Remove-Item -Path $biosPackagePath -Force -ErrorAction SilentlyContinue
                                     $biosWimParent = Split-Path $biosPackagePath -Parent
@@ -3690,6 +3702,7 @@ function Start-DATModelProcessing {
                                     }
                                     Write-DATLogEntry -Value "[$oem] Staging BIOS WIM cleaned up after Intune upload" -Severity 1
                                 }
+                                #>
 
                                 # Telemetry: BIOS report with .intunewin hash
                                 try {
@@ -4317,8 +4330,8 @@ function Update-DATApplication {
 
         Write-DATLogEntry -Value "[Update] Update applied successfully. Backup saved to $backupDir" -Severity 1
 
-        # Clean up temp download
-        Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        # Clean up temp download (Disabled in favor of pre-flights/troubleshooting/UI-setting)
+        #Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 
         return @{
             Success   = $true
@@ -4337,8 +4350,8 @@ function Update-DATApplication {
                 Write-DATLogEntry -Value "[Update] Backup restore also failed: $($_.Exception.Message)" -Severity 3
             }
         }
-        # Clean up temp
-        Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        # Clean up temp (Disabled in favor of pre-flights/troubleshooting/UI-setting)
+        #Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 
         return @{
             Success   = $false
@@ -5028,8 +5041,8 @@ function Invoke-DATOEMDownloadModule {
                 }
             }
 
-            # Clean up extracted temp files (keep staging)
-            Remove-Item -Path "$HPExtractDir\*" -Recurse -Force -ErrorAction SilentlyContinue
+            # Clean up extracted temp files (keep staging) (Disabled in favor of pre-flights/troubleshooting/UI-setting)
+            #Remove-Item -Path "$HPExtractDir\*" -Recurse -Force -ErrorAction SilentlyContinue
 
             $stagedFiles = (Get-ChildItem -Path $HPStagingDir -Recurse -File -ErrorAction SilentlyContinue).Count
             Write-DATLogEntry -Value "[HP] Extraction complete: $stagedFiles driver files staged, $skippedCount SoftPaqs skipped" -Severity 1
@@ -10274,9 +10287,9 @@ function Invoke-DATBiosPackaging {
     $versionMarker = Join-Path $destBiosFolder ".biosversion"
     Set-Content -Path $versionMarker -Value $Version -Encoding UTF8 -Force
 
-    # Clean up temp directories
-    Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -Path $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    # Clean up temp directories (Disabled in favor of pre-flights/troubleshooting/UI-setting)
+    #Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+    #Remove-Item -Path $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue
 
     return [string]$destWimFile
 }
