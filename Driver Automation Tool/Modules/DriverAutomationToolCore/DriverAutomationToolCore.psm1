@@ -2587,8 +2587,8 @@ function New-DATConfigMgrPkg {
             } else {
                 $dictionarySystems = [ordered]@{}
                 foreach ($id in $arrayBaseboards) {
-                    # To Do : get this count from somewhere
-                    $dictionarySystems.$id = 0
+                    # To Do : get count from known models
+                    $dictionarySystems.$id = $null
                 }
                 $jsonSystems = [PSCustomObject]$jsonSystems
             }

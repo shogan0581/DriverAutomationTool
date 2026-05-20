@@ -10252,6 +10252,7 @@ $grid_Packages.ItemsSource = $script:PackageData
 # Row-click checkbox toggle for Packages grid
 $grid_Packages.Add_PreviewMouseLeftButtonDown({
     param($s, $e)
+    Write-DATLogEntry -Value "[grid_Packages.PreviewMouseLeftButtonDown]" -Severity 2
     $dep = $e.OriginalSource
     $inCheckboxCol = $false
     while ($null -ne $dep -and $dep -isnot [System.Windows.Controls.DataGridRow]) {
@@ -10276,6 +10277,7 @@ $grid_Packages.Add_PreviewMouseLeftButtonDown({
 # Space bar: toggle the currently selected row.
 $grid_Packages.Add_PreviewKeyDown({
     param($s, $e)
+    Write-DATLogEntry -Value "[grid_Packages.PreviewKeyDown]" -Severity 2
     if ($e.Key -ne [System.Windows.Input.Key]::Space) { return }
     $row = $grid_Packages.ItemContainerGenerator.ContainerFromItem($grid_Packages.SelectedItem)
     if ($null -ne $row) {
@@ -10433,6 +10435,7 @@ function Invoke-DATPackageRefresh {
                     Write-DATLogEntry -Value "- Loaded $($script:PackageData.Count) packages matching '$label'" -Severity 1
 
                     # Apply warning highlighting to reported packages
+                    Write-DATLogEntry -Value "Calling [Update-DATPackageRowHighlighting]" -Severity 2
                     Update-DATPackageRowHighlighting -DataGrid $grid_Packages -ItemsSource $script:PackageData -MakeProperty 'Manufacturer' -ModelProperty 'Model' -VersionProperty 'Version'
 
                     # Populate the OS filter dropdown: merge static builds with distinct values from loaded data
@@ -10499,6 +10502,7 @@ $cmb_DeploymentState.Add_SelectionChanged({ Invoke-DATPackageRefresh })
 
 # Combined filter for ConfigMgr packages: OEM + OS + search text
 function Update-DATCmPackageFilter {
+    Write-DATLogEntry -Value "[Update-DATCmPackageFilter]" -Severity 2
     $view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($grid_Packages.ItemsSource)
     if ($null -eq $view) { return }
 
@@ -10588,11 +10592,13 @@ function Update-DATCmDeleteSelectedState {
 }
 
 $grid_Packages.Add_CellEditEnding({
+    Write-DATLogEntry -Value "[grid_Packages.CellEditEnding]" -Severity 2
     $Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [action]{
         Update-DATCmDeleteSelectedState
     })
 })
 $grid_Packages.Add_CurrentCellChanged({
+    Write-DATLogEntry -Value "[grid_Packages.CurrentCellChanged]" -Severity 2
     $Window.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [action]{
         Update-DATCmDeleteSelectedState
     })
@@ -10923,6 +10929,7 @@ $txt_PkgDetailContentStatus = $Window.FindName('txt_PkgDetailContentStatus')
 $btn_CmDeletePackage = $Window.FindName('btn_CmDeletePackage')
 
 $grid_Packages.Add_SelectionChanged({
+    Write-DATLogEntry -Value "[grid_Packages.SelectionChanged]" -Severity 2
     $selected = $grid_Packages.SelectedItem
     if ($null -eq $selected -or [string]::IsNullOrEmpty($selected.PackageID)) {
         $panel_PkgDetails.Visibility = 'Collapsed'
