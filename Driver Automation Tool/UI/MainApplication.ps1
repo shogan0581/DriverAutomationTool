@@ -8485,6 +8485,26 @@ $txt_BdrState = $Window.FindName('txt_BdrState')
 $link_DPScheduling = $Window.FindName('link_DPScheduling')
 $link_ContentManagement = $Window.FindName('link_ContentManagement')
 
+# JSON Package Descriptions controls
+$chk_CmPkgJSONDescriptions = $Window.FindName('chk_CmPkgJSONDescriptions')
+$chk_CmPkgJSONKnownSystems = $Window.FindName('chk_CmPkgJSONKnownSystems')
+$chk_CmPkgJSONDescriptions.Add_Checked({
+    Set-DATRegistryValue -Name 'JsonDescriptions' -Value 1 -Type DWord
+    Write-DATActivityLog "JSON Package Descriptions enabled" -Level Info
+})
+$chk_CmPkgJSONDescriptions.Add_Unchecked({
+    Set-DATRegistryValue -Name 'JsonDescriptions' -Value 0 -Type DWord
+    Write-DATActivityLog "JSON Package Descriptions disabled" -Level Info
+})
+$chk_CmPkgJSONKnownSystems.Add_Checked({
+    Set-DATRegistryValue -Name 'JsonKnownSystems' -Value 1 -Type DWord
+    Write-DATActivityLog "JSON Known Systems enabled" -Level Info
+})
+$chk_CmPkgJSONKnownSystems.Add_Unchecked({
+    Set-DATRegistryValue -Name 'JsonKnownSystems' -Value 0 -Type DWord
+    Write-DATActivityLog "JSON Known Systems disabled" -Level Info
+})
+
 $link_DPScheduling.Add_RequestNavigate({
     param($s, $e)
     Start-Process $e.Uri.AbsoluteUri
@@ -16727,6 +16747,26 @@ try {
         } else {
             $chk_BinaryDiffReplication.IsChecked = $false
             $txt_BdrState.Text = 'Off'
+            Write-Host "Disabled" -ForegroundColor DarkYellow
+        }
+
+        # Restore JSON Package Descriptions
+        Write-Host "  JSON Desc.    : " -NoNewline -ForegroundColor DarkGray
+        if ($null -ne $savedConfig.JsonDescriptions -and $savedConfig.JsonDescriptions -eq 1) {
+            $chk_CmPkgJSONDescriptions.IsChecked = $true
+            Write-Host "Enabled" -ForegroundColor Green
+        } else {
+            $chk_CmPkgJSONDescriptions.IsChecked = $false
+            Write-Host "Disabled" -ForegroundColor DarkYellow
+        }
+
+        # Restore JSON Known Systems
+        Write-Host "  JSON Counts   : " -NoNewline -ForegroundColor DarkGray
+        if ($null -ne $savedConfig.JsonKnownSystems -and $savedConfig.JsonKnownSystems -eq 1) {
+            $chk_CmPkgJSONKnownSystems.IsChecked = $true
+            Write-Host "Enabled" -ForegroundColor Green
+        } else {
+            $chk_CmPkgJSONKnownSystems.IsChecked = $false
             Write-Host "Disabled" -ForegroundColor DarkYellow
         }
 

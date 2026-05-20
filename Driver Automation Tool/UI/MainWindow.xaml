@@ -2234,6 +2234,60 @@
                                 <Run Text="&#xE753;" FontFamily="Segoe MDL2 Assets" FontSize="20"/><Run Text="  Distribution Points"/>
                             </TextBlock>
 
+                            <!-- JSON Package Descriptions -->
+                            <Border Style="{StaticResource CardPanel}" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource WindowForeground}" Margin="0,0,0,8">
+                                        <Run Text="&#xE734;" FontFamily="Segoe MDL2 Assets" FontSize="13"/><Run Text="  JSON Package Descriptions"/>
+                                    </TextBlock>
+                                    <TextBlock TextWrapping="Wrap" FontSize="12"
+                                               Foreground="{DynamicResource InputPlaceholder}" Margin="0,0,0,16" LineHeight="20">
+                                        Replace legacy Package Descriptions with JSON objects.
+                                    </TextBlock>
+                                    <Grid Margin="0,0,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <DockPanel Grid.Column="0" LastChildFill="False">
+                                            <Grid DockPanel.Dock="Bottom" VerticalAlignment="Bottom">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox x:Name="chk_CmPkgJSONDescriptions"
+                                                        Style="{StaticResource ToggleSwitch}"
+                                                        VerticalAlignment="Center"
+                                                        Margin="0,0,12,0"/>
+                                                <TextBlock x:Name="txt_CmPkgJSONDescriptions" Grid.Column="1"
+                                                        Text="Enable JSON Descriptions" FontSize="12" FontWeight="SemiBold"
+                                                        Foreground="{DynamicResource InputPlaceholder}"
+                                                        VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                            </Grid>
+                                        </DockPanel>
+                                        <DockPanel Grid.Column="2" LastChildFill="False">
+                                            <Grid DockPanel.Dock="Bottom" VerticalAlignment="Bottom">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox x:Name="chk_CmPkgJSONKnownSystems"
+                                                        Style="{StaticResource ToggleSwitch}"
+                                                        VerticalAlignment="Center"
+                                                        Margin="0,0,12,0"/>
+                                                <TextBlock x:Name="txt_CmPkgJSONKnownSystems" Grid.Column="1"
+                                                        Text="Include Known System Counts" FontSize="12" FontWeight="SemiBold"
+                                                        Foreground="{DynamicResource InputPlaceholder}"
+                                                        VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                            </Grid>
+                                        </DockPanel>
+
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
                             <Border Grid.Row="1" Style="{StaticResource CardPanel}" Margin="0,0,0,12">
                                 <StackPanel>
                                     <TextBlock FontSize="13" FontWeight="SemiBold"
