@@ -2493,11 +2493,32 @@ function New-DATConfigMgrPkg {
         $cimSess = New-DATCimSession -ComputerName $SiteServer
 
         # Build description -- BIOS packages include the release date in YYYYMMDD format for matching
-        $pkgDescription = if ($PackageType -eq 'BIOS' -and -not [string]::IsNullOrEmpty($ReleaseDate)) {
-            $releaseDateFormatted = try { ([datetime]$ReleaseDate).ToString('yyyyMMdd') } catch { $ReleaseDate }
-            "(Models included:$Baseboards) (Release Date:$releaseDateFormatted)"
+        $regJSONDescriptions = (Get-ItemProperty -Path $global:RegPath -Name 'JsonDescriptions' -ErrorAction SilentlyContinue).JsonDescriptions
+        $regJSONKnownSystems = (Get-ItemProperty -Path $global:RegPath -Name 'JsonDescriptions' -ErrorAction SilentlyContinue).JsonKnownsystems
+        if ($regJSONDescriptions) {
+            $arrayBaseboards = @($Baseboards -split '\W' | ForEach-Object {"$_".Trim().ToUpper()})
+            if (-not $regJSONKnownSystems) {
+                $jsonSystems = $arrayBaseboards
+            } else {
+                $dictionarySystems = [ordered]@{}
+                foreach ($id in $arrayBaseboards) {
+                    # To Do : get this count from somewhere
+                    $dictionarySystems.$id = 0
+                }
+                $jsonSystems = [PSCustomObject]$jsonSystems
+            }
+            $jsonDescription = [ordered]@{IDs=$jsonSystems}
+            if ($PackageType -eq 'BIOS' -and -not [string]::IsNullOrEmpty($ReleaseDate)){
+                $jsonDescription.ReleaseDate = try { ([datetime]$ReleaseDate).ToString('yyyyMMdd') } catch { $ReleaseDate }
+            }
+            $pkgDescription = $($jsonDescription | ConvertTo-Json -Compress)
         } else {
-            "Models included: $Baseboards"
+            $pkgDescription = if ($PackageType -eq 'BIOS' -and -not [string]::IsNullOrEmpty($ReleaseDate)) {
+                $releaseDateFormatted = try { ([datetime]$ReleaseDate).ToString('yyyyMMdd') } catch { $ReleaseDate }
+                "(Models included:$Baseboards) (Release Date:$releaseDateFormatted)"
+            } else {
+                "Models included: $Baseboards"
+            }
         }
 
         # --- Stage 1: Check existing package via WMI before copying files ---
