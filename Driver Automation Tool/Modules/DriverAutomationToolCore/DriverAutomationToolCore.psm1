@@ -1478,7 +1478,7 @@ function Invoke-DATDriverFilePackaging {
     # $localWorkDir          : $global:TempDirectory\$Oem\$Model_Name
     # $DriverFolder          : $global:TempDirectory\$Oem\$Model_Name\$OsCompact-Extracted
     # $DriverMountFolder     : $global:TempDirectory\$Oem\$Model_Name\$OsCompact-Build
-    # $destDriverMountFolder : $global:TempDirectory\$Oem\$Model_Name\$OsCompact-Packaged
+    # $destWimFolder         : $global:TempDirectory\$Oem\$Model_Name\$OsCompact-Packaged
 
     # Always use the temp directory for extraction and WIM creation, then copy the
     # final WIM to the package destination.  This keeps the Package path clean and
@@ -1663,6 +1663,14 @@ function Invoke-DATDriverFilePackaging {
         $errorMsg = "Extraction produced 0 files for $OEM $Model. The driver pack may be corrupt or the extraction failed silently. Source: $FilePath"
         Write-DATLogEntry -Value "[Error] - $errorMsg" -Severity 3 -UpdateUI
         throw $errorMsg
+    } else {
+        $ManifestFiles = @(Get-ChildItem -Path $DriverFolder -Filter "manifest.*" -File -Recurse -ErrorAction SilentlyContinue)
+        $ManifestPaths = @($ManifestFiles | Group-Object DirectoryName | Sort-Object @{e={($_.Name -split '[\\/]').Count}},Name)[0].Group.FullName
+        if ($ManifestPaths.Count -gt 0) {
+            $ManifestPaths | ForEach-Object { Write-DATLogEntry -Value "[$OEM] - Manifest Path : $($_)" -Severity 1 }
+        } else {
+            Write-DATLogEntry -Value "[$OEM] - No manifest files found under $DriverFolder" -Severity 1
+        }
     }
 
     # Inject custom drivers into the extraction folder before WIM creation
@@ -2065,26 +2073,31 @@ function Invoke-DATDriverFilePackaging {
             if ($effectiveExitCode -eq 0) {
                 # Stage WIM in the temp directory (not the package destination).
                 # Only the final ConfigMgr/Intune/standalone package should be in the Package Storage Path.
-                $destDriverMountFolder = Join-Path -Path $localWorkDir -ChildPath "$($OS.Compact)-Packaged"
-                if (-not (Test-Path -Path $destDriverMountFolder)) {
-                    New-Item -Path $destDriverMountFolder -ItemType Directory -Force | Out-Null
+                $destWimFolder = Join-Path -Path $localWorkDir -ChildPath "$($OS.Compact)-Packaged"
+                if (-not (Test-Path -Path $destWimFolder)) {
+                    New-Item -Path $destWimFolder -ItemType Directory -Force | Out-Null
                 }
-                $destWimFile = Join-Path -Path $destDriverMountFolder -ChildPath "DriverPackage.wim"
-                Write-DATLogEntry -Value "[$OEM] Staging WIM to temp directory: $destWimFile" -Severity 1 -UpdateUI
-                Set-DATRegistryValue -Name "RunningMessage" -Value "Staging WIM - $OEM $Model..." -Type String
-                Copy-Item -Path $WimFile -Destination $destWimFile -Force
-                Write-DATLogEntry -Value "[$OEM] WIM staged in temp directory successfully" -Severity 1
+                $destWimFile = Join-Path -Path $destWimFolder -ChildPath "DriverPackage.wim"
+                Write-DATLogEntry -Value "[$OEM] Staging Package to temp directory: $destWimFolder" -Severity 1 -UpdateUI
+                Set-DATRegistryValue -Name "RunningMessage" -Value "Staging Package - $OEM $Model..." -Type String
+                Copy-Item -Path $WimFile -Destination $destWimFolder -Force
+                $ManifestPaths | ForEach-Object { Copy-Item -Path $_ -Destination $destWimFolder -Force }
+                Write-DATLogEntry -Value "[$OEM] Package staged in temp directory successfully" -Severity 1
+                $(Get-ChildItem -Path $destWimFolder).FullName | ForEach-Object {
+                    Write-DATLogEntry -Value "[$OEM] $_" -Severity 1
+                }
                 $WimFile = $destWimFile
 
                 # Clean up local temp working directory (extracted files + temp WIM) (Disabled in favor of pre-flights/troubleshooting/UI-setting)
                 #Remove-Item -Path $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue
                 #Write-DATLogEntry -Value "[$OEM] Temp working directory cleaned up: $localWorkDir" -Severity 1
 
-                $wimSize = [math]::Round((Get-Item $WimFile).Length / 1MB, 2)
-                Set-DATRegistryValue -Name "PackagedDriverPath" -Value "$WimFile" -Type String
+                $wimFolderSum = (Get-ChildItem -Path $destWimFolder -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+                $wimFolderSize = [math]::Round($wimFolderSum / 1MB, 2)
+                Set-DATRegistryValue -Name "PackagedDriverPath" -Value "$destWimFolder" -Type String
                 Set-DATRegistryValue -Name "RunningMode" -Value "Extract Ready" -Type String
-                Set-DATRegistryValue -Name "RunningMessage" -Value "WIM package created ($wimSize MB) - $OEM $Model" -Type String
-                Write-DATLogEntry -Value "[$OEM] WIM package created: $WimFile ($wimSize MB)" -Severity 1 -UpdateUI
+                Set-DATRegistryValue -Name "RunningMessage" -Value "Package created ($wimFolderSize MB) - $OEM $Model" -Type String
+                Write-DATLogEntry -Value "[$OEM] Package created: $destWimFolder ($wimFolderSize MB)" -Severity 1 -UpdateUI
             } elseif ($effectiveExitCode -eq 740) {
                 $errorMsg = "WIM creation requires elevation (Run as Administrator). DISM exit code 740."
                 Set-DATRegistryValue -Name "RunningState" -Value "Error" -Type String
@@ -2601,6 +2614,8 @@ function New-DATConfigMgrPkg {
             return $true
         }
 
+        $driverPackageFolder = if (Test-Path $DriverPackage -PathType Container) { $DriverPackage } else {Split-Path $DriverPackage -Parent}
+
         # Force Update path: update existing package in-place
         if ($matchingPkg -and $ForceUpdate) {
             $pkgId = $matchingPkg.PackageID
@@ -2623,13 +2638,8 @@ function New-DATConfigMgrPkg {
             } else {
                 New-Item -Path $existingSourcePath -ItemType Directory -Force | Out-Null
             }
-            if ($PackageType -eq 'BIOS' -and (Test-Path $DriverPackage -PathType Container)) {
-                Write-DATLogEntry -Value "- [ConfigMgr] Replacing BIOS files at $existingSourcePath" -Severity 1
-                Copy-Item -Path "$DriverPackage\*" -Destination $existingSourcePath -Recurse -Force
-            } else {
-                Write-DATLogEntry -Value "- [ConfigMgr] Replacing WIM at $existingSourcePath" -Severity 1
-                Copy-Item -Path $DriverPackage -Destination $existingSourcePath -Force
-            }
+            Write-DATLogEntry -Value "- [ConfigMgr] Replacing Package files at $existingSourcePath" -Severity 1
+            Copy-Item -Path "$driverPackageFolder\*" -Destination $existingSourcePath -Recurse -Force
 
             # Update package version and description via WMI
             $pkgWmi = [wmi]"\\$SiteServer\$($smsNamespace):SMS_Package.PackageID='$pkgId'"
@@ -2709,15 +2719,8 @@ function New-DATConfigMgrPkg {
             Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\$($OS.Compact)-$Architecture-$Version"
         }
         if (-not (Test-Path $DestPath)) { New-Item -Path $DestPath -ItemType Directory -Force | Out-Null }
-
-        # BIOS ConfigMgr packages use a directory source; drivers use a single WIM file
-        if ($PackageType -eq 'BIOS' -and (Test-Path $DriverPackage -PathType Container)) {
-            Write-DATLogEntry -Value "- [ConfigMgr] Copying BIOS files to $DestPath" -Severity 1
-            Copy-Item -Path "$DriverPackage\*" -Destination $DestPath -Recurse -Force
-        } else {
-            Write-DATLogEntry -Value "- [ConfigMgr] Copying WIM to $DestPath" -Severity 1
-            Copy-Item -Path $DriverPackage -Destination $DestPath -Force
-        }
+        Write-DATLogEntry -Value "- [ConfigMgr] Copying Package files to $DestPath" -Severity 1
+        Copy-Item -Path "$driverPackageFolder\*" -Destination $DestPath -Recurse -Force
 
         # --- Stage 3: Create package via WMI ---
         Write-DATLogEntry -Value "- [ConfigMgr] Creating new package: $CMPackage" -Severity 1
@@ -3153,6 +3156,7 @@ function Start-DATModelProcessing {
         Write-DATLogEntry -Value "[$currentIndex/$totalModels] Processing $oem $modelName ($os $arch)" -Severity 1
         
         $defaultVersion = Get-Date -Format "yyyyMMdd"
+        $wimStagingDir  = Join-Path $global:TempDirectory "$oem\$modelName\$($os.Compact)-Packaged"
         $wimStagingPath = Join-Path $global:TempDirectory "$oem\$modelName\$($os.Compact)-Packaged\DriverPackage.wim"
         $wimFinalDir    = Join-Path $PackagePath "$oem\$modelName\$($os.Compact)-$arch-$defaultVersion"
         $wimFinalPath   = Join-Path $PackagePath "$oem\$modelName\$($os.Compact)-$arch-$defaultVersion\DriverPackage.wim"
@@ -3423,7 +3427,7 @@ function Start-DATModelProcessing {
 
                             $version = if (-not [string]::IsNullOrEmpty($catalogVersion)) { "$catalogVersion" } elseif (-not [string]::IsNullOrEmpty($catalogDriverVersion)) { "$catalogDriverVersion" } else { Get-Date -Format "yyyyMMdd" }
                             $cmParams = @{
-                                DriverPackage = $wimPath
+                                DriverPackage = $wimStagingDir
                                 OEM           = $oem
                                 Model         = $modelName
                                 OS            = $os
