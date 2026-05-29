@@ -632,7 +632,7 @@ function Get-DATOEMModelInfo {
         [array]$RequiredOEMs,
         [Parameter(Position = 2)]
         [ValidateNotNullOrEmpty()]
-        [string]$OS,
+        [WinVer]$OS,
         [Parameter(Position = 3)]
         [ValidateSet('x64', 'x86', 'Arm64')]
         [string]$Architecture
@@ -663,8 +663,8 @@ function Get-DATOEMModelInfo {
         New-Item -Path $global:TempDirectory -ItemType dir -Force | Out-Null
     }
 
-    $WindowsBuild = $($OS).Split(" ")[2]
-    $WindowsVersion = $OS.Trim("$WindowsBuild").TrimEnd()
+    $WindowsBuild = $OS.WindowsBuild
+    $WindowsVersion = $OS.WindowsVersion
     $OEMSupportedModels = @()
 
     foreach ($OEM in $RequiredOEMs) {
@@ -1461,7 +1461,7 @@ function Invoke-DATDriverFilePackaging {
         [string]$FilePath,
         [Parameter(Mandatory = $true)][string]$OEM,
         [Parameter(Mandatory = $true)][string]$Model,
-        [Parameter(Mandatory = $true)][string]$OS,
+        [Parameter(Mandatory = $true)][WinVer]$OS,
         [Parameter(Mandatory = $true)][string]$Destination,
         [ValidateSet('Configuration Manager', 'Intune', 'WIM Package Only', 'Download Only')]
         [string]$Platform,
@@ -2508,7 +2508,7 @@ function New-DATConfigMgrPkg {
         [Parameter(Mandatory)][string]$DriverPackage,
         [Parameter(Mandatory)][string]$OEM,
         [Parameter(Mandatory)][string]$Model,
-        [Parameter(Mandatory)][string]$OS,
+        [Parameter(Mandatory)][WinVer]$OS,
         [Parameter(Mandatory)][string]$Architecture,
         [Parameter(Mandatory)][string]$Baseboards,
         [Parameter(Mandatory)][string]$PackagePath,
@@ -3084,7 +3084,7 @@ function Start-DATModelProcessing {
         }
 
         $baseboards = if ($model.Baseboards -is [array]) { $model.Baseboards -join "," } else { [string]$model.Baseboards }
-        $os = $model.OS
+        $os = [WinVer]($model.OS)
         $arch = $model.Architecture
         $customDriverPath = $model.CustomDriverPath
         $catalogDriverVersion = if ($model.Version) { $model.Version } else { '' }
@@ -3103,8 +3103,8 @@ function Start-DATModelProcessing {
 
         Write-DATLogEntry -Value "[$currentIndex/$totalModels] Processing $oem $modelName ($os $arch)" -Severity 1
 
-        $windowsBuild = $os.Split(" ")[2]
-        $windowsVersion = $os.Replace(" $windowsBuild", "").TrimEnd()
+        $windowsBuild = $os.WindowsBuild
+        $windowsVersion = $os.WindowsVersion
 
         try {
             # ── Driver processing (when PackageType is 'Drivers' or 'All') ──────────
