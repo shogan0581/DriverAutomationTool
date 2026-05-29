@@ -672,7 +672,7 @@ function Get-DATOEMModelInfo {
                 $DellXMLCabinetSource = ($OEMLinks.OEM.Manufacturer | Where-Object { $_.Name -match "Dell" }).Link | Where-Object { $_.Type -eq "XMLCabinetSource" } | Select-Object -ExpandProperty URL -First 1
                 $DellCabFile = [string]($DellXMLCabinetSource | Split-Path -Leaf)
                 $DellXMLFile = $DellCabFile.TrimEnd(".cab") + ".xml"
-                $DellWindowsVersion = $WindowsVersion.Replace(" ", "")
+                $DellWindowsVersion = $OS.DellWindowsVersion
                 try {
                     Write-DATLogEntry -Value "[Dell] Catalog cab path: $(Join-Path $global:TempDirectory $DellCabFile)" -Severity 1
                     Write-DATLogEntry -Value "[Dell] Catalog XML extract path: $(Join-Path $global:TempDirectory $DellXMLFile)" -Severity 1
@@ -719,17 +719,17 @@ function Get-DATOEMModelInfo {
                     $global:LenovoModelDrivers = $global:LenovoModelXML.ModelList.Model
                     if (-not ([string]::IsNullOrEmpty($WindowsBuild))) {
                         $LenovoModels = ($global:LenovoModelDrivers | Where-Object {
-                            ($_.SCCM.Version -eq $WindowsBuild -and $_.SCCM.OS -eq $("Win" + "$($WindowsVersion.Split(' ')[1])"))
+                            ($_.SCCM.Version -eq $WindowsBuild -and $_.SCCM.OS -eq $OS.OS)
                         } | Sort-Object).Name
                     }
                     foreach ($Model in $LenovoModels) {
                         $modelNode = $global:LenovoModelDrivers | Where-Object { $_.Name -eq $Model } | Select-Object -First 1
                         $BaseboardValues = ([string]$($modelNode.Types.Type)).Replace(" ", ",").Trim()
                         # Get driver pack date from the matching SCCM node
-                        $sccmNode = $modelNode.SCCM | Where-Object { $_.Version -eq $WindowsBuild -and $_.OS -eq $("Win" + "$($WindowsVersion.Split(' ')[1])") } | Select-Object -First 1
+                        $sccmNode = $modelNode.SCCM | Where-Object { $_.Version -eq $WindowsBuild -and $_.OS -eq $OS.OS } | Select-Object -First 1
                         $lenovoDate = if ($sccmNode.date) { $sccmNode.date } else { '' }
                         # Check for supplemental NVIDIA GFX driver package
-                        $gfxNode = $modelNode.GFX | Where-Object { $_.os -eq $("Win" + "$($WindowsVersion.Split(' ')[1])") -and $_.version -eq $WindowsBuild } | Select-Object -First 1
+                        $gfxNode = $modelNode.GFX | Where-Object { $_.os -eq $OS.OS -and $_.version -eq $WindowsBuild } | Select-Object -First 1
                         $hasGFX = $null -ne $gfxNode
                         $gfxBrand = if ($hasGFX) { $gfxNode.brand } else { $null }
                         if ($hasGFX) { Write-DATLogEntry -Value "[Lenovo] $Model has supplemental $gfxBrand GFX driver package" -Severity 1 }
@@ -790,7 +790,7 @@ function Get-DATOEMModelInfo {
                     $global:AcerModelDrivers = $global:AcerModelXML.ModelList.Model
                     if (-not ([string]::IsNullOrEmpty($WindowsBuild))) {
                         $AcerModels = ($global:AcerModelDrivers | Where-Object {
-                            ($_.SCCM.Version -eq $WindowsBuild -and $_.SCCM.OS -eq $("Win" + "$($WindowsVersion.Split(' ')[1])"))
+                            ($_.SCCM.Version -eq $WindowsBuild -and $_.SCCM.OS -eq $OS.OS)
                         } | Sort-Object).Name
                     }
                     foreach ($Model in $AcerModels) {
@@ -2848,15 +2848,12 @@ function Start-DATModelProcessing {
 
         Write-DATLogEntry -Value "[$currentIndex/$totalModels] Processing $oem $modelName ($os $arch)" -Severity 1
 
-        $windowsBuild = $os.WindowsBuild
-        $windowsVersion = $os.WindowsVersion
-
         try {
             # ── Driver processing (when PackageType is 'Drivers' or 'All') ──────────
             if ($PackageType -in @('Drivers', 'All')) {
                 $modelBIOSOnly = [bool]$model.BIOSOnly
                 if ($modelBIOSOnly) {
-                    Write-DATLogEntry -Value "[Warning] [$currentIndex/$totalModels] SKIPPED driver processing -- no driver package available for $oem $modelName ($windowsVersion $windowsBuild) -- BIOS only model" -Severity 2
+                    Write-DATLogEntry -Value "[Warning] [$currentIndex/$totalModels] SKIPPED driver processing -- no driver package available for $oem $modelName ($os) -- BIOS only model" -Severity 2
                     if ($PackageType -eq 'Drivers') {
                         Set-DATRegistryValue -Name "PackagePhase" -Value "Drivers" -Type String
                         Set-DATRegistryValue -Name "RunningMode" -Value "DriverNoMatch" -Type String
@@ -2868,7 +2865,7 @@ function Start-DATModelProcessing {
                 # ── Pre-flight: skip download+packaging if package version is current ──
                 $skipDriverDownload = $false
                 if ($RunningMode -eq 'Configuration Manager') {
-                    $cmDriverPkgName = "Drivers - $oem $modelName - $windowsVersion $windowsBuild $arch"
+                    $cmDriverPkgName = "Drivers - $oem $modelName - $os $arch"
                     $existingCMVersion = $cmPkgVersionCache[$cmDriverPkgName]
                     if (-not [string]::IsNullOrEmpty($existingCMVersion) -and -not [string]::IsNullOrEmpty($catalogDriverVersion) -and $existingCMVersion -eq $catalogDriverVersion -and -not $modelForceUpdate) {
                         Write-DATLogEntry -Value "[$currentIndex/$totalModels] SKIPPED -- driver package version is current ($existingCMVersion): $cmDriverPkgName" -Severity 1
@@ -2881,7 +2878,7 @@ function Start-DATModelProcessing {
                     }
                 } elseif ($RunningMode -eq 'Intune') {
                     # Check cached Intune app list -- compare display version against catalog version
-                    $expectedDisplayName = "Drivers - $oem $modelName - $windowsVersion $windowsBuild $arch"
+                    $expectedDisplayName = "Drivers - $oem $modelName - $os $arch"
                     Write-DATLogEntry -Value "[$currentIndex/$totalModels] Checking for existing Intune package: $expectedDisplayName" -Severity 1
                     $existingIntuneApp = $cachedIntuneApps | Where-Object {
                         $_.displayName -eq $expectedDisplayName
@@ -2900,7 +2897,7 @@ function Start-DATModelProcessing {
                     }
                 } else {
                     # Download Only / WIM Package Only -- check if WIM already exists from today
-                    $existingWimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$windowsVersion $windowsBuild\DriverPackage.wim"
+                    $existingWimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
                     if ((Test-Path $existingWimPath) -and (Get-Item $existingWimPath).LastWriteTime.Date -eq (Get-Date).Date -and -not $modelForceUpdate) {
                         Write-DATLogEntry -Value "[$currentIndex/$totalModels] SKIPPED download -- driver WIM already created today: $existingWimPath" -Severity 1
                         Set-DATRegistryValue -Name "RunningMessage" -Value "Skipped (exists): $oem $modelName" -Type String
@@ -2913,8 +2910,8 @@ function Start-DATModelProcessing {
                 $catalogVersion = Invoke-DATOEMDownloadModule -OEM $oem `
                     -Model $modelName `
                     -SystemSKU "$baseboards" `
-                    -WindowsBuild $windowsBuild `
-                    -WindowsVersion $windowsVersion `
+                    -WindowsBuild $os.WindowsBuild `
+                    -WindowsVersion $os.WindowsVersion `
                     -Architecture $arch `
                     -DownloadDestination (Join-Path $StoragePath "$oem\$modelName") `
                     -PackageDestination $PackagePath `
@@ -2926,7 +2923,7 @@ function Start-DATModelProcessing {
 
                 # Intune: Create and upload Win32 app after packaging
                 if ($RunningMode -eq 'Intune') {
-                    $wimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$windowsVersion $windowsBuild\DriverPackage.wim"
+                    $wimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
                     if (Test-Path $wimPath) {
                         Write-DATLogEntry -Value "[$currentIndex/$totalModels] Starting Intune pipeline for $oem $modelName" -Severity 1
                         Set-DATRegistryValue -Name "RunningMessage" -Value "Creating Intune package: $oem $modelName..." -Type String
@@ -2935,7 +2932,7 @@ function Start-DATModelProcessing {
                             OEM                = $oem
                             Model              = $modelName
                             Baseboards         = $baseboards
-                            OS                 = "$windowsVersion $windowsBuild"
+                            OS                 = $os
                             Architecture       = $arch
                             WimFilePath        = $wimPath
                             PackageDestination = $PackagePath
@@ -2963,7 +2960,7 @@ function Start-DATModelProcessing {
 
                         # Update cached app list so subsequent iterations detect this package
                         if ($null -ne $intuneResult -and -not [string]::IsNullOrEmpty($intuneResult.AppId) -and -not $intuneResult.Skipped) {
-                            $driverDisplayName = "Drivers - $oem $modelName - $windowsVersion $windowsBuild $arch"
+                            $driverDisplayName = "Drivers - $oem $modelName - $os $arch"
                             $driverCacheVersion = if (-not [string]::IsNullOrEmpty($catalogDriverVersion)) { $catalogDriverVersion } else { Get-Date -Format "yyyyMMdd" }
                             $cachedIntuneApps += [PSCustomObject]@{
                                 id             = $intuneResult.AppId
@@ -3025,12 +3022,12 @@ function Start-DATModelProcessing {
 
                         # Telemetry: driver report with .intunewin hash
                         try {
-                            $intuneWinDir = Join-Path $PackagePath "IntuneWin\$oem\$modelName\$windowsVersion $windowsBuild"
+                            $intuneWinDir = Join-Path $PackagePath "IntuneWin\$oem\$modelName\$os"
                             $intuneWinFile = Get-ChildItem -Path $intuneWinDir -Filter '*.intunewin' -ErrorAction SilentlyContinue | Select-Object -First 1
                             $drvHash = if ($intuneWinFile) { Get-DATPackageHash -FilePath $intuneWinFile.FullName } else { $null }
                             $drvSize = if ($intuneWinFile) { $intuneWinFile.Length } else { 0 }
                             Send-DATDriverReport -Manufacturer $oem -Model $modelName `
-                                -OSVersion "$windowsVersion $windowsBuild" -OSArchitecture $arch -Platform 'Intune' `
+                                -OSVersion $os -OSArchitecture $arch -Platform 'Intune' `
                                 -Status 'Success' -PackageSize $drvSize -PackageHash $drvHash
                         } catch {
                             Write-DATLogEntry -Value "[Telemetry] Driver report failed: $($_.Exception.Message)" -Severity 2
@@ -3042,7 +3039,7 @@ function Start-DATModelProcessing {
 
                 # ConfigMgr: Create driver package on site server after packaging
                 if ($RunningMode -eq 'Configuration Manager') {
-                    $wimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$windowsVersion $windowsBuild\DriverPackage.wim"
+                    $wimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
                     if (Test-Path $wimPath) {
                         if (-not [string]::IsNullOrEmpty($SiteServer) -and -not [string]::IsNullOrEmpty($SiteCode)) {
                             Write-DATLogEntry -Value "[$currentIndex/$totalModels] Starting ConfigMgr driver pipeline for $oem $modelName" -Severity 1
@@ -3055,7 +3052,7 @@ function Start-DATModelProcessing {
                                 DriverPackage = $wimPath
                                 OEM           = $oem
                                 Model         = $modelName
-                                OS            = "$windowsVersion $windowsBuild"
+                                OS            = $os
                                 Architecture  = $arch
                                 Baseboards    = $baseboards
                                 PackagePath   = $PackagePath
@@ -3083,7 +3080,7 @@ function Start-DATModelProcessing {
                                     $drvHash = Get-DATPackageHash -FilePath $wimPath
                                     $drvSize = if (Test-Path $wimPath) { (Get-Item $wimPath).Length } else { 0 }
                                     Send-DATDriverReport -Manufacturer $oem -Model $modelName `
-                                        -OSVersion "$windowsVersion $windowsBuild" -OSArchitecture $arch `
+                                        -OSVersion $os -OSArchitecture $arch `
                                         -Platform 'ConfigMgr' -Status 'Success' `
                                         -PackageVersion $version -PackageSize $drvSize -PackageHash $drvHash
                                 } catch {
@@ -3115,9 +3112,9 @@ function Start-DATModelProcessing {
 
                 # WIM Package Only: copy the final WIM from temp staging to the Package Storage Path
                 if ($RunningMode -eq 'WIM Package Only') {
-                    $wimStagingPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$windowsVersion $windowsBuild\DriverPackage.wim"
+                    $wimStagingPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
                     if (Test-Path $wimStagingPath) {
-                        $wimFinalDir = Join-Path $PackagePath "$oem\$modelName\$windowsVersion $windowsBuild"
+                        $wimFinalDir = Join-Path $PackagePath "$oem\$modelName\$os"
                         if (-not (Test-Path $wimFinalDir)) { New-Item -Path $wimFinalDir -ItemType Directory -Force | Out-Null }
                         $wimFinalPath = Join-Path $wimFinalDir "DriverPackage.wim"
                         Copy-Item -Path $wimStagingPath -Destination $wimFinalPath -Force
@@ -3140,13 +3137,13 @@ function Start-DATModelProcessing {
                         # WIM Package Only moves the WIM to PackagePath; Download Only keeps it in temp staging
                         $dlWimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$windowsVersion $windowsBuild\DriverPackage.wim"
                         if (-not (Test-Path $dlWimPath)) {
-                            $dlWimPath = Join-Path $PackagePath "$oem\$modelName\$windowsVersion $windowsBuild\DriverPackage.wim"
+                            $dlWimPath = Join-Path $PackagePath "$oem\$modelName\$os\DriverPackage.wim"
                         }
                         if (Test-Path $dlWimPath) {
                             $drvHash = Get-DATPackageHash -FilePath $dlWimPath
                             $drvSize = (Get-Item $dlWimPath).Length
                             Send-DATDriverReport -Manufacturer $oem -Model $modelName `
-                                -OSVersion "$windowsVersion $windowsBuild" -OSArchitecture $arch `
+                                -OSVersion $os -OSArchitecture $arch `
                                 -Platform $RunningMode -Status 'Success' `
                                 -PackageSize $drvSize -PackageHash $drvHash
                         }
@@ -3157,7 +3154,7 @@ function Start-DATModelProcessing {
 
                 # Count driver package success -- check if the WIM was produced (Download Only)
                 # or if it was successfully consumed by the Intune/ConfigMgr pipeline
-                $drvWimCheck = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$windowsVersion $windowsBuild\DriverPackage.wim"
+                $drvWimCheck = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
                 if ((Test-Path $drvWimCheck) -or $script:driverPipelineSuccess) { $driverPackageSuccessCount++ }
                 $script:driverPipelineSuccess = $false
                 } # end if (-not $skipDriverDownload)
@@ -3269,7 +3266,7 @@ function Start-DATModelProcessing {
                                     OEM                = $oem
                                     Model              = $modelName
                                     Baseboards         = $baseboards
-                                    OS                 = "$windowsVersion $windowsBuild"
+                                    OS                 = $os
                                     Architecture       = $arch
                                     WimFilePath        = $biosPackagePath
                                     PackageDestination = $PackagePath
@@ -3395,7 +3392,7 @@ function Start-DATModelProcessing {
                                         DriverPackage = $biosPackagePath
                                         OEM           = $oem
                                         Model         = $modelName
-                                        OS            = "$windowsVersion $windowsBuild"
+                                        OS            = $os
                                         Architecture  = $arch
                                         Baseboards    = $baseboards
                                         PackagePath   = $PackagePath
@@ -4132,6 +4129,7 @@ function Invoke-DATOEMDownloadModule {
         [string]$RunningMode = "Download Only",
         [string]$CustomDriverPath
     )
+    $OS = [WinVer]"$WindowsVersion $WindowsBuild"
 
     [Net.ServicePointManager]::SecurityProtocol = (
         [Net.ServicePointManager]::SecurityProtocol -bor
@@ -4217,7 +4215,7 @@ function Invoke-DATOEMDownloadModule {
             if (-not (Test-Path $DellXMLPath)) { throw "Dell catalog XML not found after extraction" }
 
             [xml]$DellModelXML = Get-Content -Path $DellXMLPath -Raw
-            $DellWindowsVersion = $WindowsVersion.Replace(" ", "")
+            $DellWindowsVersion = $OS.DellWindowsVersion
 
             $matchingPkg = $DellModelXML.driverpackmanifest.driverpackage | Where-Object {
                 ($_.SupportedOperatingSystems.OperatingSystem.osCode -eq $DellWindowsVersion) -and
@@ -4264,15 +4262,8 @@ function Invoke-DATOEMDownloadModule {
             Write-DATLogEntry -Value "[HP] Download Destination: $DownloadDestination" -Severity 1
             Write-DATLogEntry -Value "[HP] Temp Directory: $TempDirectory" -Severity 1
 
-            # Determine OS parameter for HPCMSL
-            switch -Wildcard ($WindowsVersion) {
-                "*Windows 11*" { $HPOS = "Win11" }
-                "*Windows 10*" { $HPOS = "Win10" }
-                default { $HPOS = "Win11" }
-            }
-
             # Build HP-specific temp path: Temp\HP\Model\OS\OSVer
-            $HPTempDirectory = Join-Path $TempDirectory "HP\$Model\$HPOS\$WindowsBuild"
+            $HPTempDirectory = Join-Path $TempDirectory "HP\$Model\$($OS.Os)\$($OS.OsVer)"
             if (-not (Test-Path $HPTempDirectory)) { New-Item -Path $HPTempDirectory -ItemType Directory -Force | Out-Null }
             $HPExtractDir = Join-Path $HPTempDirectory "Extracted"
             $HPStagingDir = Join-Path $HPTempDirectory "Staging"
@@ -4322,7 +4313,7 @@ function Invoke-DATOEMDownloadModule {
 
                 try {
                     $SoftPaqInfo = $null
-                    $SoftPaqStdOut = New-HPDriverPack -Platform "$PlatformID" -Os "$HPOS" -OSVer "$WindowsBuild" -Format wim `
+                    $SoftPaqStdOut = New-HPDriverPack -Platform "$PlatformID" -Os $OS.Os -OSVer $OS.OsVer -Format wim `
                         -Path "$DownloadDestination" -TempDownloadPath "$HPTempDirectory" `
                         -WhatIf -InformationVariable SoftPaqInfo -ErrorVariable SoftPaqError -ErrorAction SilentlyContinue
 
@@ -4550,7 +4541,7 @@ function Invoke-DATOEMDownloadModule {
             Write-DATLogEntry -Value "[HP] Extracting $($successfulIDs.Count) SoftPaqs and copying drivers..." -Severity 1
 
             # OS identifier for INF path lookup
-            $OsId = if ($HPOS -eq 'Win11') { 'W11' } else { 'WT64' }
+            $OsId = if ($OS.Os -eq 'Win11') { 'W11' } else { 'WT64' }
             $fullInfPathName = "$($OsId)_$($WindowsBuild.ToUpper())_INFPath"
             $fallbackInfPathName = "$($OsId)_INFPath"
             Write-DATLogEntry -Value "[HP] INF path keys: primary=$fullInfPathName, fallback=$fallbackInfPathName" -Severity 1
@@ -4667,7 +4658,8 @@ function Invoke-DATOEMDownloadModule {
                 Write-DATLogEntry -Value "[HP] Creating WIM package from staging directory..." -Severity 1
 
                 $null = Invoke-DATDriverFilePackaging -FilePath $HPStagingDir -OEM $OEM -Model $Model `
-                    -OS "$WindowsVersion $WindowsBuild" -Destination $packageDest -Platform $packagingPlatform
+                    -OS $OS -Destination $packageDest -Platform $packagingPlatform `
+                    -CustomDriverPath $CustomDriverPath
             }
 
             Set-DATRegistryValue -Name "RunningMode" -Value "Download Completed" -Type String
@@ -4695,7 +4687,7 @@ function Invoke-DATOEMDownloadModule {
 
             [xml]$LenovoModelXML = Get-Content -Path $LenovoFilePath
             $LenovoDrivers = $LenovoModelXML.ModelList.Model
-            $WinVer = "Win" + "$($WindowsVersion.Split(' ')[1])"
+            $WinVer = $OS.OS
 
             $matchingModel = $LenovoDrivers | Where-Object {
                 $_.Name -eq $Model -and $_.SCCM.Version -eq $WindowsBuild -and $_.SCCM.OS -eq $WinVer
@@ -4778,7 +4770,7 @@ function Invoke-DATOEMDownloadModule {
 
             [xml]$AcerModelXML = Get-Content -Path $AcerFilePath
             $AcerDrivers = $AcerModelXML.ModelList.Model
-            $WinVer = "Win" + "$($WindowsVersion.Split(' ')[1])"
+            $WinVer = $OS.OS
 
             Write-DATLogEntry -Value "[$OEM] Searching catalog for: Name='$Model' OS='$WinVer' Build='$WindowsBuild'" -Severity 1
 
@@ -4907,7 +4899,7 @@ function Invoke-DATOEMDownloadModule {
             FilePath     = $downloadedFile
             OEM          = $OEM
             Model        = $Model
-            OS           = "$WindowsVersion $WindowsBuild"
+            OS           = $OS
             Destination  = $packageDest
             Platform     = $packagingPlatform
         }
