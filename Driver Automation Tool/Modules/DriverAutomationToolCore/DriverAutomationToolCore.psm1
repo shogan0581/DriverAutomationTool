@@ -1372,17 +1372,28 @@ function Invoke-DATDriverFilePackaging {
         [string[]]$SupplementalFilePaths = @(),
         [string]$CustomDriverPath
     )
+    # Approximate Upstream Paths
+    # $localWorkDir          : $global:TempDirectory\Build\$Oem\$Model_Name
+    # $DriverFolder          : $global:TempDirectory\Build\$Oem\$Model_Name\$Operating_System\Extracted
+    # $DriverMountFolder     : $global:TempDirectory\Build\$Oem\$Model_Name\Packaged\$Oem\$Model_Name\$Operating_System
+    # $destDriverMountFolder : $global:TempDirectory\Packaged\$Oem\$Model_Name\$Operating_System
+
+    # Approximate Updated Paths
+    # $localWorkDir          : $global:TempDirectory\$Oem\$Model_Name
+    # $DriverFolder          : $global:TempDirectory\$Oem\$Model_Name\$OsCompact-Extracted
+    # $DriverMountFolder     : $global:TempDirectory\$Oem\$Model_Name\$OsCompact-Build
+    # $destDriverMountFolder : $global:TempDirectory\$Oem\$Model_Name\$OsCompact-Packaged
 
     # Always use the temp directory for extraction and WIM creation, then copy the
     # final WIM to the package destination.  This keeps the Package path clean and
     # ensures temp files are cleaned up automatically.  Also handles UNC destinations
     # since DISM cannot create WIMs on network shares.
-    $localWorkDir = Join-Path $global:TempDirectory "Build\$OEM\$Model"
+    $localWorkDir = Join-Path $global:TempDirectory "$OEM\$Model"
     #if (Test-Path $localWorkDir) { Remove-Item $localWorkDir -Recurse -Force -ErrorAction SilentlyContinue } # Disabled in favor of pre-flights/troubleshooting/UI-setting
     New-Item -Path $localWorkDir -ItemType Directory -Force | Out-Null
     Write-DATLogEntry -Value "[$OEM] Using local temp working directory: $localWorkDir" -Severity 1
 
-    $DriverFolder = Join-Path -Path $localWorkDir -ChildPath "$OS\Extracted"
+    $DriverFolder = Join-Path -Path $localWorkDir -ChildPath "$($OS.Compact)-Extracted"
     if (-not (Test-Path -Path $DriverFolder)) {
         New-Item -Path $DriverFolder -ItemType Directory -Force | Out-Null
     }
@@ -1393,9 +1404,9 @@ function Invoke-DATDriverFilePackaging {
 
     if (Test-Path -Path $DriverFolder) {
         if (Test-Path -Path $FilePath -PathType Container) {
-            # HP pre-extracted staging directory -- copy contents directly
-            Write-DATLogEntry -Value "[$OEM] Copying pre-extracted drivers from staging directory..." -Severity 1
-            Copy-Item -Path "$FilePath\*" -Destination $DriverFolder -Recurse -Force -ErrorAction SilentlyContinue
+            # HP pre-extracted staging directory -- redirect to extracted content
+            Write-DATLogEntry -Value "[$OEM] Setting staging directory to pre-extracted drivers directory" -Severity 1
+            $DriverFolder = $FilePath
         } else {
             switch -Wildcard ($FilePath) {
                 "*.exe" {
@@ -1594,7 +1605,7 @@ function Invoke-DATDriverFilePackaging {
         Write-DATLogEntry -Value "[$OEM] Creating WIM package for $Model..." -Severity 1 -UpdateUI
 
         try {
-            $DriverMountFolder = Join-Path -Path $localWorkDir -ChildPath "Packaged\$OEM\$Model\$OS"
+            $DriverMountFolder = Join-Path -Path $localWorkDir -ChildPath "$($OS.Compact)-Build"
             if (-not (Test-Path -Path $DriverMountFolder)) {
                 New-Item -Path $DriverMountFolder -ItemType Directory -Force | Out-Null
             }
@@ -1958,7 +1969,7 @@ function Invoke-DATDriverFilePackaging {
             if ($effectiveExitCode -eq 0) {
                 # Stage WIM in the temp directory (not the package destination).
                 # Only the final ConfigMgr/Intune/standalone package should be in the Package Storage Path.
-                $destDriverMountFolder = Join-Path -Path $global:TempDirectory -ChildPath "Packaged\$OEM\$Model\$OS"
+                $destDriverMountFolder = Join-Path -Path $localWorkDir -ChildPath "$($OS.Compact)-Packaged"
                 if (-not (Test-Path -Path $destDriverMountFolder)) {
                     New-Item -Path $destDriverMountFolder -ItemType Directory -Force | Out-Null
                 }
@@ -2331,6 +2342,13 @@ function New-DATConfigMgrPkg {
         [switch]$EnableBinaryDeltaReplication,
         [switch]$ForceUpdate
     )
+    # Approximate Upstream Paths
+    # $existingSourcePath : $PackagePath\$Oem\$Model_Name\(BIOS|$Operating_System\$Architecture)\$Version
+    # $DestPath           : $PackagePath\$Oem\$Model_Name\(BIOS|$Operating_System\$Architecture)\$Version
+
+    # Approximate Updated Paths
+    # $existingSourcePath : $PackagePath\$Oem\$Model_Name\(BIOS|$OSCompact-$Architecture)-$Version
+    # $DestPath           : $PackagePath\$Oem\$Model_Name\(BIOS|$OSCompact-$Architecture)-$Version
 
     try {
         $smsNamespace = "root\SMS\Site_$SiteCode"
@@ -2371,9 +2389,9 @@ function New-DATConfigMgrPkg {
             if ([string]::IsNullOrEmpty($existingSourcePath)) {
                 Write-DATLogEntry -Value "[Warning] - Existing package $pkgId has no source path, falling back to default" -Severity 2
                 $existingSourcePath = if ($PackageType -eq 'BIOS') {
-                    Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\BIOS\$Version"
+                    Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\BIOS-$Version"
                 } else {
-                    Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\$OS\$Architecture\$Version"
+                    Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\$($OS.Compact)-$Architecture-$Version"
                 }
             }
 
@@ -2464,9 +2482,9 @@ function New-DATConfigMgrPkg {
 
         # --- Stage 2: Copy WIM to destination (filesystem, no CM drive needed) ---
         $DestPath = if ($PackageType -eq 'BIOS') {
-            Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\BIOS\$Version"
+            Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\BIOS-$Version"
         } else {
-            Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\$OS\$Architecture\$Version"
+            Join-Path -Path $PackagePath -ChildPath "$OEM\$Model\$($OS.Compact)-$Architecture-$Version"
         }
         if (-not (Test-Path $DestPath)) { New-Item -Path $DestPath -ItemType Directory -Force | Out-Null }
 
@@ -2709,6 +2727,32 @@ function Start-DATModelProcessing {
         [switch]$TeamsNotificationsEnabled,
         [string]$CustomToastTextsJson
     )
+    # Approximate Upstream Paths
+    # $existingDlDir       : $StoragePath\$Oem\$Model_Name
+    # $existingWimPath     : $StoragePath\Packaged\$Oem\$Model_Name\$Operating_System\DriverPackage.wim
+    # -DownloadDestination : $StoragePath\$Oem\$Model_Name
+    # $wimPath             : $StoragePath\Packaged\$Oem\$Model_Name\$Operating_System\DriverPackage.wim
+    # $wimStagingPath      : $StoragePath\Packaged\$Oem\$Model_Name\$Operating_System\DriverPackage.wim
+    # $wimFinalDir         : $PackagePath\$Oem\$Model_Name\$Operating_System
+    # $wimFinalPath        : $PackagePath\$Oem\$Model_Name\$Operating_System\DriverPackage.wim
+    # $dlDestDir           : $StoragePath\$Oem\$Model_Name
+    # $dlWimPath           : $StoragePath\Packaged\$Oem\$Model_Name\$Operating_System\DriverPackage.wim
+    # $dlWimPath           : $PackagePath\$Oem\$Model_Name\$Operating_System\DriverPackage.wim
+    # $drvWimCheck         : $StoragePath\Packaged\$Oem\$Model_Name\$Operating_System\DriverPackage.wim
+
+    # Approximate Updated Paths
+    # $existingDlDir       : $dlDestDir
+    # $existingWimPath     : $wimStagingPath
+    # -DownloadDestination : $dlDestDir
+    # $wimPath             : $wimStagingPath
+    # $wimStagingPath      : $StoragePath\$Oem\$Model_Name\$OsCompact-Packaged\DriverPackage.wim
+    # $wimFinalDir         : $PackagePath\$Oem\$Model_Name\$OsCompact-$Architecture-$Version
+    # $wimFinalPath        : $PackagePath\$Oem\$Model_Name\$OsCompact-$Architecture-$Version\DriverPackage.wim
+    # $dlDestDir           : $StoragePath\$Oem\$Model_Name
+    # $dlWimPath           : $wimStagingPath
+    # $dlWimPath           : $wimFinalPath
+    # $drvWimCheck         : $wimStagingPath
+    
     $global:ScriptDirectory = $ScriptDirectory
     $global:LogDirectory = Join-Path $ScriptDirectory "Logs"
     $global:TempDirectory = if ([string]::IsNullOrEmpty($StoragePath)) { Join-Path $ScriptDirectory "Temp" } else { $StoragePath }
@@ -2847,6 +2891,12 @@ function Start-DATModelProcessing {
         Set-DATRegistryValue -Name "DownloadSpeed" -Value "---" -Type String
 
         Write-DATLogEntry -Value "[$currentIndex/$totalModels] Processing $oem $modelName ($os $arch)" -Severity 1
+        
+        $defaultVersion = Get-Date -Format "yyyyMMdd"
+        $wimStagingPath = Join-Path $global:TempDirectory "$oem\$modelName\$($os.Compact)-Packaged\DriverPackage.wim"
+        $wimFinalDir    = Join-Path $PackagePath "$oem\$modelName\$($os.Compact)-$arch-$defaultVersion"
+        $wimFinalPath   = Join-Path $PackagePath "$oem\$modelName\$($os.Compact)-$arch-$defaultVersion\DriverPackage.wim"
+        $dlDestDir      = Join-Path $StoragePath "$oem\$modelName"
 
         try {
             # ── Driver processing (when PackageType is 'Drivers' or 'All') ──────────
@@ -2913,7 +2963,7 @@ function Start-DATModelProcessing {
                     -WindowsBuild $os.WindowsBuild `
                     -WindowsVersion $os.WindowsVersion `
                     -Architecture $arch `
-                    -DownloadDestination (Join-Path $StoragePath "$oem\$modelName") `
+                    -DownloadDestination $dlDestDir `
                     -PackageDestination $PackagePath `
                     -RegPath $RegPath `
                     -LogDirectory $global:LogDirectory `
@@ -2923,7 +2973,7 @@ function Start-DATModelProcessing {
 
                 # Intune: Create and upload Win32 app after packaging
                 if ($RunningMode -eq 'Intune') {
-                    $wimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
+                    $wimPath = $wimStagingPath
                     if (Test-Path $wimPath) {
                         Write-DATLogEntry -Value "[$currentIndex/$totalModels] Starting Intune pipeline for $oem $modelName" -Severity 1
                         Set-DATRegistryValue -Name "RunningMessage" -Value "Creating Intune package: $oem $modelName..." -Type String
@@ -3039,7 +3089,7 @@ function Start-DATModelProcessing {
 
                 # ConfigMgr: Create driver package on site server after packaging
                 if ($RunningMode -eq 'Configuration Manager') {
-                    $wimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
+                    $wimPath = $wimStagingPath
                     if (Test-Path $wimPath) {
                         if (-not [string]::IsNullOrEmpty($SiteServer) -and -not [string]::IsNullOrEmpty($SiteCode)) {
                             Write-DATLogEntry -Value "[$currentIndex/$totalModels] Starting ConfigMgr driver pipeline for $oem $modelName" -Severity 1
@@ -3112,11 +3162,8 @@ function Start-DATModelProcessing {
 
                 # WIM Package Only: copy the final WIM from temp staging to the Package Storage Path
                 if ($RunningMode -eq 'WIM Package Only') {
-                    $wimStagingPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
                     if (Test-Path $wimStagingPath) {
-                        $wimFinalDir = Join-Path $PackagePath "$oem\$modelName\$os"
                         if (-not (Test-Path $wimFinalDir)) { New-Item -Path $wimFinalDir -ItemType Directory -Force | Out-Null }
-                        $wimFinalPath = Join-Path $wimFinalDir "DriverPackage.wim"
                         Copy-Item -Path $wimStagingPath -Destination $wimFinalPath -Force
                         Write-DATLogEntry -Value "[$currentIndex/$totalModels] WIM package stored: $wimFinalPath" -Severity 1
                         # Clean up staging WIM
@@ -3137,7 +3184,7 @@ function Start-DATModelProcessing {
                         # WIM Package Only moves the WIM to PackagePath; Download Only keeps it in temp staging
                         $dlWimPath = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$windowsVersion $windowsBuild\DriverPackage.wim"
                         if (-not (Test-Path $dlWimPath)) {
-                            $dlWimPath = Join-Path $PackagePath "$oem\$modelName\$os\DriverPackage.wim"
+                            $dlWimPath = $wimFinalPath
                         }
                         if (Test-Path $dlWimPath) {
                             $drvHash = Get-DATPackageHash -FilePath $dlWimPath
@@ -3154,8 +3201,14 @@ function Start-DATModelProcessing {
 
                 # Count driver package success -- check if the WIM was produced (Download Only)
                 # or if it was successfully consumed by the Intune/ConfigMgr pipeline
-                $drvWimCheck = Join-Path $global:TempDirectory "Packaged\$oem\$modelName\$os\DriverPackage.wim"
-                if ((Test-Path $drvWimCheck) -or $script:driverPipelineSuccess) { $driverPackageSuccessCount++ }
+                # For Download Only, the raw download exists (no WIM) -- check the download folder
+                $drvWimCheck = $wimStagingPath
+                if ($RunningMode -eq 'Download Only') {
+                    # Download Only skips WIM packaging -- success = downloaded file exists in destination
+                    $dlDestDir = Join-Path $StoragePath "$oem\$modelName"
+                    $dlFileExists = (Test-Path $dlDestDir) -and @(Get-ChildItem -Path $dlDestDir -File -ErrorAction SilentlyContinue).Count -gt 0
+                    if ($dlFileExists) { $driverPackageSuccessCount++ }
+                } elseif ((Test-Path $drvWimCheck) -or $script:driverPipelineSuccess) { $driverPackageSuccessCount++ }
                 $script:driverPipelineSuccess = $false
                 } # end if (-not $skipDriverDownload)
             } # end if (-not $modelBIOSOnly)
@@ -4129,6 +4182,22 @@ function Invoke-DATOEMDownloadModule {
         [string]$RunningMode = "Download Only",
         [string]$CustomDriverPath
     )
+    # Approximate Common Paths
+    # $DownloadDestination : $StoragePath\$Oem\$Model_Name
+    # $PackageDestination  : $PackagePath
+    # $TempDirectory       : $global:TempDirectory
+    # $packageDest         : $PackageDestination | $DownloadDestination
+
+    # Approximate Upstream Paths
+    # $HPTempDirectory : $TempDirectory\HP\$Model_Name\$Os\$OsVer
+    # $HPExtractDir    : $TempDirectory\HP\$Model_Name\$Os\$OsVer\Extracted
+    # $HPStagingDir    : $TempDirectory\HP\$Model_Name\$Os\$OsVer\Staging
+
+    # Approximate Updated Paths
+    # $HPTempDirectory : $TempDirectory\HP\$Model_Name\$OsCompact-Download
+    # $HPExtractDir    : $TempDirectory\HP\$Model_Name\$OsCompact-Extracted
+    # $HPStagingDir    : $TempDirectory\HP\$Model_Name\$OsCompact-Staging
+
     $OS = [WinVer]"$WindowsVersion $WindowsBuild"
 
     [Net.ServicePointManager]::SecurityProtocol = (
@@ -4263,10 +4332,9 @@ function Invoke-DATOEMDownloadModule {
             Write-DATLogEntry -Value "[HP] Temp Directory: $TempDirectory" -Severity 1
 
             # Build HP-specific temp path: Temp\HP\Model\OS\OSVer
-            $HPTempDirectory = Join-Path $TempDirectory "HP\$Model\$($OS.Os)\$($OS.OsVer)"
-            if (-not (Test-Path $HPTempDirectory)) { New-Item -Path $HPTempDirectory -ItemType Directory -Force | Out-Null }
-            $HPExtractDir = Join-Path $HPTempDirectory "Extracted"
-            $HPStagingDir = Join-Path $HPTempDirectory "Staging"
+            $HPTempDirectory = Join-Path $TempDirectory "HP\$Model\$($OS.Compact)-Download"
+            $HPExtractDir    = Join-Path $TempDirectory "HP\$Model\$($OS.Compact)-Extracted"
+            $HPStagingDir    = Join-Path $TempDirectory "HP\$Model\$($OS.Compact)-Staging"
             foreach ($dir in @($HPTempDirectory, $HPExtractDir, $HPStagingDir)) {
                 if (-not (Test-Path $dir)) { New-Item -Path $dir -ItemType Directory -Force | Out-Null }
             }
@@ -8523,7 +8591,7 @@ function Invoke-DATIntunePackageCreation {
         # Step 1: Copy WIM to staging
         Write-DATLogEntry -Value "[Intune Pipeline] Copying WIM to staging directory..." -Severity 1 -UpdateUI
         Set-DATRegistryValue -Name "RunningMessage" -Value "Staging WIM for $OEM $Model..." -Type String
-        Copy-Item -Path $WimFilePath -Destination (Join-Path $stagingDir "DriverPackage.wim") -Force
+        Copy-Item -Path $WimFilePath -Destination (Join-Path $stagingDir $(Get-Item $WimFilePath).Name) -Force
         $wimSize = [math]::Round((Get-Item $WimFilePath).Length / 1MB, 2)
         Write-DATLogEntry -Value "[Intune Pipeline] WIM staged: $wimSize MB" -Severity 1
 
@@ -9341,15 +9409,26 @@ function Invoke-DATBiosPackaging {
         [Parameter(Mandatory)][string]$PackageDestination,
         [switch]$SkipWim
     )
+    # Approximate Upstream Paths
+    # $localWorkDir : $global:TempDirectory\BIOSBuild\$Oem\$Model_Name
+    # $biosStaging  : $global:TempDirectory\BIOSBuild\$Oem\$Model_Name\Packaged\$Oem\$Model_Name\BIOS
+    # $extractDir   : $global:TempDirectory\BIOSExtract\$Oem\$Model_Name
+    # $wimFile      : $global:TempDirectory\BIOSBuild\$Oem\$Model_Name\Packaged\$Oem\$Model_Name\BIOS\DriverPackage.wim
 
+    # Approximate Updated Paths
+    # $localWorkDir : $global:TempDirectory\$Oem\$Model_Name\BIOS-Build
+    # $extractDir   : $global:TempDirectory\$Oem\$Model_Name\BIOS-Extract
+    # $biosStaging  : $global:TempDirectory\$Oem\$Model_Name\BIOS-Staging
+    # $wimFile      : $global:TempDirectory\$Oem\$Model_Name\BIOS-Staging\DriverPackage.wim
+    
     # BIOS packages are OS-agnostic -- use "BIOS" as the subfolder instead of OS name.
     # Build the WIM in the Temporary Storage Path, then copy to the Package Store --
     # same pattern as Invoke-DATDriverFilePackaging (avoids writing temp data into the
     # package store and handles UNC destinations where DISM cannot create WIMs directly).
-    $localWorkDir = Join-Path $global:TempDirectory "BIOSBuild\$OEM\$Model"
-    $biosStaging = Join-Path $localWorkDir "Packaged\$OEM\$Model\BIOS"
-    $extractDir = Join-Path $global:TempDirectory "BIOSExtract\$OEM\$Model"
-    $wimFile = Join-Path $biosStaging "DriverPackage.wim"
+    $localWorkDir   = Join-Path $global:TempDirectory "$OEM\$Model\BIOS-Build"
+    $extractDir     = Join-Path $global:TempDirectory "$OEM\$Model\BIOS-Extract"
+    $biosStaging    = Join-Path $global:TempDirectory "$OEM\$Model\BIOS-Staging"
+    $wimFile        = Join-Path $global:TempDirectory "$OEM\$Model\BIOS-Staging\DriverPackage.wim"
     $destBiosFolder = Join-Path $PackageDestination "$OEM\$Model\BIOS"
 
     # Clean previous
