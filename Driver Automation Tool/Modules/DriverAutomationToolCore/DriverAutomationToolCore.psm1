@@ -5151,6 +5151,32 @@ function Invoke-DATOEMDownloadModule {
                 throw "No driver files were extracted from HP SoftPaqs for $Model"
             }
 
+            # ── Step 3.5: Create manifests ─────────────────────
+            $paramsSoftpaqList = [ordered]@{Platform=$PlatformID;Os=$OS.Os;OsVer=$OS.OsVer;Bitness=64;MaxRetries=3;}
+            $fullSoftpaqList = @(Get-HPSoftpaqList @paramsSoftpaqList -Verbose:$VerbosePreference -AddHttps)
+            $dpbSoftpaqList  = @($fullSoftpaqList | Where-Object {$_.DPB})
+            $uniqueIDs = @($successfulIDs | Sort-Object -Unique)
+            $matchedSPs = @($fullSoftpaqList | Where-Object {$uniqueIDs -contains $_.Id})
+            $matchedIDs = [System.Collections.Generic.HashSet[string]]$matchedSPs.Id
+            $stubProperties = @($fullSoftpaqList[0].PSObject.Properties.Name | Where-Object {$_ -ne 'Id'})
+            $unmatchedIDs = @($uniqueIDs | Where-Object {-not $matchedIDs.Contains($_)} | ForEach-Object {[ordered]@{Id=$_}})
+            $unmatchedSPs = @(foreach ($stub in $unmatchedIDs) {$stubProperties | ForEach-Object { $stub[$_] = $null };[PSCustomObject]$stub})
+            $manifestSoftpaqs = @($matchedSPs) + @($unmatchedSPs)
+            Write-DATLogEntry -Value "[HP] successfulIDs : $($uniqueIDs.Count)" -Severity 1
+            Write-DATLogEntry -Value "[HP] fullSoftpaqList : $($fullSoftpaqList.Count)" -Severity 1
+            Write-DATLogEntry -Value "[HP] dpbSoftpaqList : $($dpbSoftpaqList.Count)" -Severity 1
+            Write-DATLogEntry -Value "[HP] matchedSPs : $($matchedSPs.Count)" -Severity 1
+            Write-DATLogEntry -Value "[HP] unmatchedSPs : $($unmatchedSPs.Count)" -Severity 1
+            Write-DATLogEntry -Value "[HP] manifestSoftpaqs : $($manifestSoftpaqs.Count)" -Severity 1
+            $manifestPath = Join-Path $HPStagingDir 'manifest'
+            $manifestObject = [PSCustomObject]@{Date=$(Get-Date -Format s);Name="DP$PlatformID";Os=$OS.Os;OsVer=$OS.OsVer;SoftPaqs=@($manifestSoftpaqs)}
+            Write-DATLogEntry -Value  "[HP] Creating manifest file: $manifestPath.json" -Severity 1
+            $manifestJson = ConvertTo-Json -InputObject $manifestObject
+            $manifestJson | Out-File -LiteralPath "$manifestPath.json"
+            Write-DATLogEntry -Value  "[HP] Creating manifest file: $manifestPath.xml" -Severity 1
+            $manifestXml  = ConvertTo-Xml -InputObject $manifestObject -As String -Depth 2 -NoTypeInformation
+            $manifestXml  | Out-File -LiteralPath "$manifestPath.xml"
+
             # ── Step 4: Package (WIM creation via common path) ────────────────────
             # HP now flows into common packaging like other OEMs.
             # Create a sentinel file so Invoke-DATDriverFilePackaging can find the staging dir.
