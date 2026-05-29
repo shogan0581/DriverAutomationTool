@@ -9401,6 +9401,28 @@ $txt_BdrState = $Window.FindName('txt_BdrState')
 $link_DPScheduling = $Window.FindName('link_DPScheduling')
 $link_ContentManagement = $Window.FindName('link_ContentManagement')
 
+# JSON Package Descriptions controls
+$chk_CmPkgJSONDescriptions = $Window.FindName('chk_CmPkgJSONDescriptions')
+$txt_CmPkgJSONDescriptions = $Window.FindName('txt_CmPkgJSONDescriptions')
+$chk_CmPkgJSONKnownSystems = $Window.FindName('chk_CmPkgJSONKnownSystems')
+$txt_CmPkgJSONKnownSystems = $Window.FindName('txt_CmPkgJSONKnownSystems')
+$chk_CmPkgJSONDescriptions.Add_Checked({
+    Set-DATRegistryValue -Name 'JsonDescriptions' -Value 1 -Type DWord
+    Write-DATActivityLog "JSON Package Descriptions enabled" -Level Info
+})
+$chk_CmPkgJSONDescriptions.Add_Unchecked({
+    Set-DATRegistryValue -Name 'JsonDescriptions' -Value 0 -Type DWord
+    Write-DATActivityLog "JSON Package Descriptions disabled" -Level Info
+})
+$chk_CmPkgJSONKnownSystems.Add_Checked({
+    Set-DATRegistryValue -Name 'JsonKnownSystems' -Value 1 -Type DWord
+    Write-DATActivityLog "JSON Known Systems enabled" -Level Info
+})
+$chk_CmPkgJSONKnownSystems.Add_Unchecked({
+    Set-DATRegistryValue -Name 'JsonKnownSystems' -Value 0 -Type DWord
+    Write-DATActivityLog "JSON Known Systems disabled" -Level Info
+})
+
 # Custom Console Folder controls
 $chk_CustomConsoleFolder = $Window.FindName('chk_CustomConsoleFolder')
 $txt_CustomConsoleFolderState = $Window.FindName('txt_CustomConsoleFolderState')
@@ -19185,6 +19207,12 @@ try {
             $txt_BdrState.Text = 'Off'
             Write-Host "Disabled" -ForegroundColor DarkYellow
         }
+
+        # Restore Package Descriptions
+        $bool_CmPkgJSONDescriptions = (Get-ItemProperty -Path $global:RegPath -Name 'JsonDescriptions' -ErrorAction SilentlyContinue).JsonDescriptions
+        $bool_CmPkgJSONKnownSystems = (Get-ItemProperty -Path $global:RegPath -Name 'JsonKnownSystems' -ErrorAction SilentlyContinue).JsonDescriptions
+        $chk_CmPkgJSONDescriptions.IsChecked = if ($bool_CmPkgJSONDescriptions -eq 1) { $true } else { $false }
+        $chk_CmPkgJSONKnownSystems.IsChecked = if ($bool_CmPkgJSONKnownSystems -eq 1) { $true } else { $false }
 
         # Restore Custom Console Folder
         Write-Host "  Console Folder: " -NoNewline -ForegroundColor DarkGray
