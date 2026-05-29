@@ -488,6 +488,55 @@ function Reset-DATRegistryValues {
 
 #endregion Registry
 
+#region Class Definitions
+
+# CSharp WinVer class for parsing and normalizing Windows release strings
+$WinVerTypeDefinition = @"
+using System;
+using System.Text.RegularExpressions;
+public class WinVer {
+    public string Input   { get; private set; }  // Win|Windows + digits + extra
+    public string Family  { get; private set; }  // Win, Windows
+    public string Line    { get; private set; }  // 10, 11
+    public string Version { get; private set; }  // 21H2, 22H2, etc.
+    public string Win     { get; private set; }  // Win10, Win11
+    public string Windows { get; private set; }  // Windows10, Windows11
+    public string Product { get; private set; }  // Windows 10, Windows 11
+    public string Compact { get; private set; }  // Win10, Win11, Win10-21H2, Win11-25H2, etc.
+    public string Safe    { get; private set; }  // Windows10, Windows11, Windows10-21H2, Windows11-25H2, etc.
+    public string Display { get; private set; }  // Windows 10, Windows 11, Windows 10 21H2, Windows 11 25H2, etc.
+    // DAT Variable Shortcuts
+    public string WindowsBuild       { get { return Version; } }
+    public string WindowsVersion     { get { return Product; } }
+    public string DellWindowsVersion { get { return Windows; } }
+    public string Os                 { get { return Win; } }
+    public string OsVer              { get { return Version; } }
+    // Initialization
+    public WinVer(string input) {
+        Input = input;
+        var match = Regex.Match(input, @"^(Win|Windows)\D*(\d+)(?:\s+(\S+))*", RegexOptions.IgnoreCase);
+        if (!match.Success)
+            throw new ArgumentException("Invalid Windows version string", input);
+        Family  = match.Groups[1].Value;
+        Line    = match.Groups[2].Value;
+        Version = match.Groups[3].Value;
+        Win     = "Win" + Line;
+        Windows = "Windows" + Line;
+        Product = "Windows " + Line;
+        Compact = string.IsNullOrWhiteSpace(Version) ? Win     : Win     + "-" + Version;
+        Safe    = string.IsNullOrWhiteSpace(Version) ? Windows : Windows + "-" + Version;
+        Display = string.IsNullOrWhiteSpace(Version) ? Product : Product + " " + Version;
+    }
+    // Default String Casting
+    public override string ToString() {
+        return Display;
+    }
+}
+"@
+if ($null -eq ([System.Management.Automation.PSTypeName]'WinVer').Type) {Add-Type -TypeDefinition $WinVerTypeDefinition -Verbose}
+
+#end region Class Definitions
+
 #region OEM Sources
 
 function Get-DATOEMSources {
