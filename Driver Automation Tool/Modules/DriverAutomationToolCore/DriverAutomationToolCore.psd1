@@ -22,6 +22,8 @@
         'Install-DATDriverPackage',
         'Start-DATModelProcessing',
         'Connect-DATConfigMgr',
+        'ConvertTo-DATNormalizedMake',
+        'ConvertTo-DATNormalizedModel',
         'Get-DATConfigMgrKnownModels',
         'Get-DATSiteCode',
         'Get-DATDistributionPoints',
