@@ -2085,6 +2085,83 @@ function Connect-DATConfigMgr {
     }
 }
 
+function ConvertTo-DATNormalizedMake {
+    <#
+    .SYNOPSIS
+        Normalizes device manufacturer names.
+        E.g. "Dell Inc." -> "Dell", "Hewlett-Packard" -> "HP", "LENOVO" -> "Lenovo".
+    #>
+    param ([string]$Make)
+    if ([string]::IsNullOrWhiteSpace($Make)) { return $null }
+    $m = $Make.Trim()
+    # Catalog Supported Makes
+    if ($m -match '^Dell') { return 'Dell' }
+    if ($m -match '^(HP|Hewlett-Packard|Compaq)') { return 'HP' }
+    if ($m -match '^Lenovo') { return 'Lenovo' }
+    if ($m -match '^Microsoft') { return 'Microsoft' }
+    if ($m -match '^Acer') { return 'Acer' }
+    # Non-Catalog Corrections
+    if ($m -match '^ASUS(Tek)*') { return 'ASUS' }
+    if ($m -match '^MSI$|^Micro.*Star.*Int') { return 'MSI' }
+    if ($m -match '^TOSHIBA') { return 'Toshiba' }
+    # Fallback to first word
+    return @($m -split '\W')[0]
+}
+
+function ConvertTo-DATNormalizedModel {
+    <#
+    .SYNOPSIS
+        Normalizes device model names partly for OEM catalog matching.
+        Strips manufacturers and common device-type suffixes that
+        appear in Intune/WMI data but not in OEM driver catalogs.
+    #>
+    param ([string]$Make, [string]$Model)
+    if ([string]::IsNullOrWhiteSpace($Model)) { return $null }
+    # All: trim whitespace and remove make prefix
+    $m = $Model.Trim() -replace "^$($Make)\s*",""
+    # HP: remove manufacturer prefixes, remove common suffixes, and alter common strings
+    if ($Make -match '^(HP|Hewlett-Packard|Compaq)') {
+        $m = $m -replace '^(HP|Hewlett-Packard|Compaq)\s*',''
+        # remove common suffixes - from upstream
+        $m = $m -replace '\s+2-in-1\s+Notebook\s+PC$',''     # confirmed only known HP variation
+        #$m = $m -replace '\s+Mobile\s+Workstation\s+PC$','' # keeping abbreviated below
+        $m = $m -replace '\s+Notebook\s+PC$',''
+        $m = $m -replace '\s+Desktop\s+PC$',''
+        #$m = $m -replace '\s+All-in-One$',''                # keeping abbreviated below
+        #$m = $m -replace '\s+Mobile\s+Workstation$',''      # keeping abbreviated below
+        $m = $m -replace '\s+PC$',''
+        $m = $m -replace '\s+AI$',''                         # new, suffix only
+        # replace common abbreviations - from upstream
+        #$m = $m -replace '\sSFF\b',' Small Form Factor'     # less common than abbreviation and fairly lengthy
+        #$m = $m -replace '\sUSDT\b',' Desktop'              # uncommon and somewhat ambigious replacement
+        #$m = $m -replace '\sTWR\b',' Tower'                 # uncommon in catalogs and zero modern overlap
+        # contract common abbreviations - confirmed common usage across catalogs and/or known systems
+        $m = $m -replace 'All-in-One','AiO'
+        $m = $m -replace 'Desktop Mini','DM'
+        $m = $m -replace 'Small Form Factor','SFF'
+        $m = $m -replace 'Mobile Workstation.*','MWS'
+        $m = $m -replace 'Notebook','NB'
+        # remove specific strings
+        $m = $m -replace '\s*[\d\.]{2,}\D?inch\b',''  # e.g. 12 inch, 13-inch, 15.6 inch
+        $m = $m -replace '\s*Base Model\b',''
+        # remove specific strings and anything after
+        #$m = $m -replace '\s*35W$',''           # upstream - 35W suffix only
+        $m = $m -replace '\s+\d+W\b.*',''        # e.g. 35W, 65W, 65W (TAA), etc.
+        $m = $m -replace '\s+PC\b.*',''          # e.g. PC RCTO Base, etc.
+        $m = $m -replace '\s+Next Gen\b.*',''    # e.g. Next Gen, Next Gen AI, Next Gen AI PC, etc.
+        # custom corrections
+        $m = $m -replace 'AiO (\d+).*','$1 AiO'  # mis-named 'AiO 24 nTS','24 All-in-One PC'
+    } elseif ($Make -match '^Lenovo' -and $m.Length -ge 4) {
+        # WMI Model is typically a 4-char machine type (e.g. 21G2) or
+        # a 10-char MTM (e.g. 21G2001EUS); extract the 4-char type prefix
+        $friendlyName = Find-DATLenovoModelType -ModelType $m.Substring(0, 4)
+        if (-not [string]::IsNullOrEmpty($friendlyName)) {
+            $m = $friendlyName.Trim()
+        }
+    }
+    return $m.Trim()
+}
+
 function Get-DATConfigMgrKnownModels {
     <#
     .SYNOPSIS
@@ -2138,153 +2215,138 @@ function Get-DATConfigMgrKnownModels {
 
         $cimSession = New-CimSession -ComputerName $SiteServer -ErrorAction Stop
 
-        # --- OEM query definitions ---
-        # Each entry: OEM display name, WQL query, Make property, Model property
-        $oemQueries = @(
-            @{
-                OEM   = 'HP'
-                Query = "SELECT DISTINCT Manufacturer, Model FROM SMS_G_System_COMPUTER_SYSTEM WHERE (Manufacturer = 'Hewlett-Packard' OR Manufacturer = 'HP') AND Model NOT LIKE '%Proliant%'"
-                MakeProp  = 'Manufacturer'
-                ModelProp = 'Model'
-                NormalizeMake  = 'HP'
-                NormalizeModel = $true
-            },
-            @{
-                OEM   = 'Dell'
-                Query = "SELECT DISTINCT Manufacturer, Model FROM SMS_G_System_COMPUTER_SYSTEM WHERE Manufacturer = 'Dell Inc.'"
-                MakeProp  = 'Manufacturer'
-                ModelProp = 'Model'
-                NormalizeMake  = 'Dell'
-                NormalizeModel = $false
-            },
-            @{
-                OEM   = 'Lenovo'
-                Query = "SELECT DISTINCT Manufacturer, Model FROM SMS_G_System_COMPUTER_SYSTEM WHERE Manufacturer = 'LENOVO'"
-                MakeProp  = 'Manufacturer'
-                ModelProp = 'Model'
-                NormalizeMake  = 'Lenovo'
-                NormalizeModel = $false
-            },
-            @{
-                OEM   = 'Microsoft'
-                Query = "SELECT DISTINCT SystemManufacturer, SystemProductName FROM SMS_G_System_MS_SYSTEMINFORMATION WHERE SystemManufacturer LIKE 'Microsoft%' AND SystemProductName LIKE 'Surface%'"
-                MakeProp  = 'SystemManufacturer'
-                ModelProp = 'SystemProductName'
-                NormalizeMake  = 'Microsoft'
-                NormalizeModel = $false
-            },
-            @{
-                OEM   = 'Acer'
-                Query = "SELECT DISTINCT Manufacturer, Model FROM SMS_G_System_COMPUTER_SYSTEM WHERE Manufacturer = 'Acer'"
-                MakeProp  = 'Manufacturer'
-                ModelProp = 'Model'
-                NormalizeMake  = 'Acer'
-                NormalizeModel = $false
-            }
-        )
-
-        # --- Supplemental baseboard queries (optional classes; silently ignored if not collected) ---
-        # HP: SMS_G_System_BASE_BOARD.Product holds the 4-char system ID (e.g. 8B4F).
-        #     Keyed by ResourceID so it can be joined to COMPUTER_SYSTEM results.
-        $hpBaseboardMap = @{}   # ResourceID -> Product
+        # --- System Resource queries ---
+        $cmSystemResource = [ordered]@{
+            csManufacturer = $null
+            csModel = $null
+            bbManufacturer = $null
+            bbProduct = $null
+            siSystemFamily = $null
+            siSystemSKU = $null
+        }
+        $cmSystemResources = @{}
         try {
-            $hpBBResults = @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
-                -Query "SELECT ResourceID, Product FROM SMS_G_System_BASE_BOARD WHERE Manufacturer LIKE 'HP%' OR Manufacturer LIKE 'Hewlett%'" `
-                -ErrorAction Stop)
-            foreach ($r in $hpBBResults) {
-                if (-not [string]::IsNullOrWhiteSpace($r.Product)) {
-                    $hpBaseboardMap[[string]$r.ResourceID] = $r.Product.Trim().ToUpper()
+            # Build ResourceID table. Locks Resource IDs to avoid partial updates from multiple queries.
+            $cmSystemResults = @(Get-CimInstance -CimSession $cimSession -Namespace $namespace -Query "SELECT DISTINCT ResourceID FROM SMS_G_System_COMPUTER_SYSTEM")
+            foreach ($r in $cmSystemResults) {
+                $cmSystemResources[[string]$r.ResourceID] = [PSCustomObject]$cmSystemResource
+            }
+            Write-DATLogEntry -Value "[ConfigMgr Known Models] COMPUTER_SYSTEM: $($cmSystemResources.Count) entries" -Severity 1
+            # Attempt MS_SYSTEMINFORMATION query. Most comprehensive management instance but not present by default for client hardware inventory.
+            $cmSystemInformation = try {
+                @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
+                    -Query "SELECT DISTINCT ResourceID, SystemManufacturer, SystemProductName, BaseBoardManufacturer, BaseBoardProduct, SystemFamily, SystemSKU FROM SMS_G_System_MS_SYSTEMINFORMATION")
+            } catch {
+                Write-DATLogEntry -Value "[ConfigMgr Known Models] MS_SYSTEMINFORMATION query issue: $($_.Exception.Message)" -Severity 2
+            }
+            if ($null -ne $cmSystemInformation) {
+                Write-DATLogEntry -Value "[ConfigMgr Known Models] MS_SYSTEMINFORMATION: $($cmSystemInformation.Count) entries" -Severity 1
+                foreach ($r in $cmSystemInformation) {
+                    $ResourceID = [string]$r.ResourceID
+                    if ($null -ne $cmSystemResources[$ResourceID]) {
+                        $cmSystemResources[$ResourceID].csManufacturer = ([string]$r.SystemManufacturer).Trim()
+                        $cmSystemResources[$ResourceID].csModel = ([string]$r.SystemProductName).Trim()
+                        $cmSystemResources[$ResourceID].bbManufacturer = ([string]$r.BaseBoardManufacturer).Trim()
+                        $cmSystemResources[$ResourceID].bbProduct = ([string]$r.BaseBoardProduct).Trim()
+                        $cmSystemResources[$ResourceID].siSystemFamily = ([string]$r.SystemFamily).Trim()
+                        $cmSystemResources[$ResourceID].siSystemSKU = ([string]$r.SystemSKU).Trim()
+                    }
+                }
+            } else {
+                # Base COMPUTER_SYSTEM query. Collects minimum of Manufacturer/Make and Product/Model commonly.
+                $cmComputerSystem = try {
+                    @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
+                        -Query "SELECT DISTINCT ResourceID, Manufacturer, Model FROM SMS_G_System_COMPUTER_SYSTEM")
+                } catch {
+                    Write-DATLogEntry -Value "[ConfigMgr Known Models] COMPUTER_SYSTEM query failed: $($_.Exception.Message)" -Severity 3
+                }
+                foreach ($r in $cmComputerSystem) {
+                    $ResourceID = [string]$r.ResourceID
+                    if ($null -ne $cmSystemResources[$ResourceID]) {
+                        $cmSystemResources[$ResourceID].csManufacturer = ([string]$r.Manufacturer).Trim()
+                        $cmSystemResources[$ResourceID].csModel = ([string]$r.Model).Trim()
+                    }
+                }
+                # Attempt System SKU query from COMPUTER_SYSTEM.
+                $cmComputerSystem = try {
+                    @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
+                        -Query "SELECT DISTINCT ResourceID, SystemSKUNumber FROM SMS_G_System_COMPUTER_SYSTEM")
+                } catch {
+                    Write-DATLogEntry -Value "[ConfigMgr Known Models] SystemSKUNumber query issue: $($_.Exception.Message)" -Severity 2
+                }
+                foreach ($r in $cmComputerSystem) {
+                    $ResourceID = [string]$r.ResourceID
+                    if ($null -ne $cmSystemResources[$ResourceID]) {
+                        $cmSystemResources[$ResourceID].siSystemSKU = ([string]$r.SystemSKUNumber).Trim()
+                    }
+                }
+                # Attempt System Family query from COMPUTER_SYSTEM.
+                <# Placeholder for potential future use
+                $cmComputerSystem = try {
+                    @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
+                        -Query "SELECT DISTINCT ResourceID, SystemFamily FROM SMS_G_System_COMPUTER_SYSTEM")
+                } catch {
+                    Write-DATLogEntry -Value "[ConfigMgr Known Models] SystemFamily query issue: $($_.Exception.Message)" -Severity 2
+                }
+                foreach ($r in $cmComputerSystem) {
+                    $ResourceID = [string]$r.ResourceID
+                    if ($null -ne $cmSystemResources[$ResourceID]) {
+                        $cmSystemResources[$ResourceID].siSystemFamily = ([string]$r.SystemFamily).Trim()
+                    }
+                }
+                #>
+                # Attempt BASEBOARD query
+                $cmBaseBoard = try {
+                    @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
+                        -Query "SELECT DISTINCT ResourceID, Manufacturer, Product FROM SMS_G_System_BASEBOARD")
+                } catch {
+                    Write-DATLogEntry -Value "[ConfigMgr Known Models] BASEBOARD query issue: $($_.Exception.Message)" -Severity 2
+                }
+                foreach ($r in $cmBaseBoard) {
+                    $ResourceID = [string]$r.ResourceID
+                    if ($null -eq $cmSystemResources[$ResourceID]) {
+                        $cmSystemResources[$ResourceID] = [PSCustomObject]$cmSystemResource
+                    }
+                    $cmSystemResources[$ResourceID].bbManufacturer = ([string]$r.Manufacturer).Trim()
+                    $cmSystemResources[$ResourceID].bbProduct = ([string]$r.Product).Trim()
                 }
             }
-            Write-DATLogEntry -Value "[ConfigMgr Known Models] HP BASE_BOARD: $($hpBaseboardMap.Count) entries" -Severity 1
-        } catch {
-            Write-DATLogEntry -Value "[ConfigMgr Known Models] HP BASE_BOARD query skipped (class not collected): $($_.Exception.Message)" -Severity 1
-        }
-
-        # Dell: SystemSKUNumber lives in SMS_G_System_COMPUTER_SYSTEM (same class, extra property).
-        #       Keyed by Model name so it can be joined during the main loop.
-        $dellSkuMap = @{}   # Model -> SystemSKUNumber
-        try {
-            $dellSkuResults = @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
-                -Query "SELECT DISTINCT Model, SystemSKUNumber FROM SMS_G_System_COMPUTER_SYSTEM WHERE Manufacturer = 'Dell Inc.' AND SystemSKUNumber IS NOT NULL" `
-                -ErrorAction Stop)
-            foreach ($r in $dellSkuResults) {
-                $sku = [string]$r.SystemSKUNumber
-                if (-not [string]::IsNullOrWhiteSpace($sku) -and -not [string]::IsNullOrWhiteSpace($r.Model)) {
-                    $dellSkuMap[$r.Model.Trim()] = $sku.Trim().ToUpper()
-                }
-            }
-            Write-DATLogEntry -Value "[ConfigMgr Known Models] Dell SystemSKUNumber: $($dellSkuMap.Count) entries" -Severity 1
-        } catch {
-            Write-DATLogEntry -Value "[ConfigMgr Known Models] Dell SystemSKUNumber query skipped (property not collected): $($_.Exception.Message)" -Severity 1
-        }
-
-        foreach ($oem in $oemQueries) {
-            if ($OnProgress) { & $OnProgress "Querying $($oem.OEM) models..." }
-            Write-DATLogEntry -Value "[ConfigMgr Known Models] Querying $($oem.OEM): $($oem.Query)" -Severity 1
-
+            # Normalize System Resources into devicePairs table
             try {
-                $results = @(Get-CimInstance -CimSession $cimSession -Namespace $namespace -Query $oem.Query -ErrorAction Stop)
-                Write-DATLogEntry -Value "[ConfigMgr Known Models] $($oem.OEM): $($results.Count) raw results" -Severity 1
+                if ($OnProgress) { & $OnProgress "Normalizing System Resources..." }
+                Write-DATLogEntry -Value "[ConfigMgr Known Models] Normalizing System Resources..." -Severity 1
+                foreach ($item in $cmSystemResources.Values) {
+                    # Switch to baseboard values when computer system values are empty or start with System (generic placeholder).
+                    $_make = @($item.csManufacturer, $item.bbManufacturer) | Where-Object {$_ -notmatch '^System |^$'} | Select-Object -First 1
+                    $_model = @($item.csModel, $item.bbProduct) | Where-Object {$_ -notmatch '^System |^$'} | Select-Object -First 1
+                    # Call central normalization functions on make/model.
+                    $make = ConvertTo-DATNormalizedMake -Make $_make
+                    $model = ConvertTo-DATNormalizedModel -Make $make -Model $_model
+                    if ([string]::IsNullOrEmpty($model)) { continue }
+                    $potentialIDs = @($item.bbProduct,$item.siSystemSKU,$(@($item.siSystemSKU -split 'SKU=([0-9A-F]{4});')[1]),$(try {$item.csModel.SubString(0,4)} catch {}))
+                    $baseboard = $($potentialIDs | Where-Object {$_ -match '^[0-9A-F]{4}$'} | ForEach-Object {$_.ToUpper()} | Select-Object -First 1)
 
-                foreach ($item in $results) {
-                    $make = $oem.NormalizeMake
-                    $model = $item.($oem.ModelProp)
-                    if ([string]::IsNullOrWhiteSpace($model)) { continue }
-                    $model = $model.Trim()
-                    $baseboard = $null
-
-                    # HP model name normalization + baseboard lookup
-                    if ($oem.NormalizeModel) {
-                        $model = $model -replace '^(HP|Hewlett-Packard|COMPAQ|Hp|Compaq)\s*', ''
-                        $model = $model -replace '\sSFF\b', ' Small Form Factor'
-                        $model = $model -replace '\sUSDT\b', ' Desktop'
-                        $model = $model -replace '\sTWR\b', ' Tower'
-                        $model = $model -replace '\s*35W$', ''
-                        $model = $model -replace '\s+PC$', ''
-                        $model = $model.Trim()
-                        # Resolve baseboard from BASE_BOARD map if available
-                        $resId = [string]$item.ResourceID
-                        if ($hpBaseboardMap.ContainsKey($resId)) {
-                            $baseboard = $hpBaseboardMap[$resId]
+                    $key = "$make|$model"
+                    if (-not $devicePairs.ContainsKey($key)) {
+                        $devicePairs[$key] = [PSCustomObject]@{
+                            Make      = $make
+                            Model     = $model
+                            Baseboard = $baseboard   # $null if class not collected
+                            #Family = $family # family placeholder
                         }
-                    }
-
-                    # Lenovo: resolve machine type to friendly model name; machine type IS the baseboard
-                    if ($oem.OEM -eq 'Lenovo' -and $model.Length -ge 4) {
-                        # WMI Model is typically a 4-char machine type (e.g. 21G2) or
-                        # a 10-char MTM (e.g. 21G2001EUS); extract the 4-char type prefix
-                        $machineType = $model.Substring(0, 4)
-                        $baseboard = $machineType.ToUpper()
-                        $friendlyName = Find-DATLenovoModelType -ModelType $machineType
-                        if (-not [string]::IsNullOrEmpty($friendlyName)) {
-                            $model = $friendlyName.Trim()
-                        }
-                    }
-
-                    # Dell: look up SystemSKUNumber by model name
-                    if ($oem.OEM -eq 'Dell' -and $dellSkuMap.ContainsKey($model)) {
-                        $baseboard = $dellSkuMap[$model]
-                    }
-
-                    if (-not [string]::IsNullOrEmpty($model)) {
-                        $key = "$make|$model"
-                        if (-not $devicePairs.ContainsKey($key)) {
-                            $devicePairs[$key] = [PSCustomObject]@{
-                                Make      = $make
-                                Model     = $model
-                                Baseboard = $baseboard   # $null if class not collected
-                            }
-                        } elseif ($null -ne $baseboard -and $null -eq $devicePairs[$key].Baseboard) {
-                            # Enrich existing entry with baseboard if we now have one
-                            $devicePairs[$key].Baseboard = $baseboard
-                        }
+                    } elseif ($null -ne $baseboard -and $null -eq $devicePairs[$key].Baseboard) {
+                        # Enrich existing entry with baseboard if we now have one
+                        $devicePairs[$key].Baseboard = $baseboard
                     }
                 }
+                Write-DATLogEntry -Value "[ConfigMgr Known Models] Normalization complete" -Severity 1
             }
             catch {
-                Write-DATLogEntry -Value "[ConfigMgr Known Models] $($oem.OEM) query failed: $($_.Exception.Message)" -Severity 2
+                Write-DATLogEntry -Value "[ConfigMgr Known Models] Normalization failed: $($_.Exception.Message)" -Severity 3
             }
+        }
+        catch {
+            Write-DATLogEntry -Value "[ConfigMgr Known Models] COMPUTER_SYSTEM query failed: $($_.Exception.Message)" -Severity 3
         }
     }
     catch {

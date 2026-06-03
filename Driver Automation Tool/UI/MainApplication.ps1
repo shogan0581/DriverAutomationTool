@@ -6117,51 +6117,6 @@ $txt_ModelSearch.Add_TextChanged({
 
 $btn_SelectKnownModels = $Window.FindName('btn_SelectKnownModels')
 
-function ConvertTo-DATNormalizedMake {
-    <#
-    .SYNOPSIS
-        Normalizes a device manufacturer name to match OEM catalog conventions.
-        E.g. "Dell Inc." -> "Dell", "Hewlett-Packard" -> "HP", "LENOVO" -> "Lenovo".
-    #>
-    param ([string]$Make)
-    if ([string]::IsNullOrWhiteSpace($Make)) { return $Make }
-    $m = $Make.Trim()
-    if ($m -match '^Dell') { return 'Dell' }
-    if ($m -match '^(HP|Hewlett-Packard|COMPAQ|Compaq)') { return 'HP' }
-    if ($m -match '^Lenovo$') { return 'Lenovo' }
-    if ($m -match '^Microsoft') { return 'Microsoft' }
-    if ($m -match '^Acer') { return 'Acer' }
-    return $m
-}
-
-function ConvertTo-DATNormalizedModel {
-    <#
-    .SYNOPSIS
-        Normalizes a device model name to match OEM catalog conventions.
-        Strips manufacturer prefixes and common device-type suffixes that
-        appear in Intune/WMI data but not in OEM driver catalogs.
-    #>
-    param ([string]$Make, [string]$Model)
-    if ([string]::IsNullOrWhiteSpace($Model)) { return $Model }
-    $m = $Model.Trim()
-    # HP: strip manufacturer prefix and common suffixes (matches catalog regex strip)
-    if ($Make -match '^(HP|Hewlett-Packard|COMPAQ|Compaq)') {
-        $m = $m -replace '^(HP|Hewlett-Packard|COMPAQ|Hp|Compaq)\s*', ''
-        $m = $m -replace '\s+2-in-1\s+Notebook\s+PC$', ''
-        $m = $m -replace '\s+Mobile\s+Workstation\s+PC$', ''
-        $m = $m -replace '\s+Notebook\s+PC$', ''
-        $m = $m -replace '\s+Desktop\s+PC$', ''
-        $m = $m -replace '\s+All-in-One$', ''
-        $m = $m -replace '\s+Mobile\s+Workstation$', ''
-        $m = $m -replace '\s+PC$', ''
-        $m = $m -replace '\sSFF\b', ' Small Form Factor'
-        $m = $m -replace '\sUSDT\b', ' Desktop'
-        $m = $m -replace '\sTWR\b', ' Tower'
-        $m = $m -replace '\s*35W$', ''
-    }
-    return $m.Trim()
-}
-
 function Test-DATKnownDeviceMatch {
     <#
     .SYNOPSIS
