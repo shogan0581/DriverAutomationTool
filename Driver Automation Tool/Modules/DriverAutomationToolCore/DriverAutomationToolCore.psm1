@@ -2223,6 +2223,10 @@ function Get-DATConfigMgrKnownModels {
             bbProduct = $null
             siSystemFamily = $null
             siSystemSKU = $null
+            Make = $null
+            Model = $null
+            Product = $null
+            Baseboard = $null
         }
         $cmSystemResources = @{}
         try {
@@ -2325,6 +2329,10 @@ function Get-DATConfigMgrKnownModels {
                     if ([string]::IsNullOrEmpty($model)) { continue }
                     $potentialIDs = @($item.bbProduct,$item.siSystemSKU,$(@($item.siSystemSKU -split 'SKU=([0-9A-F]{4});')[1]),$(try {$item.csModel.SubString(0,4)} catch {}))
                     $baseboard = $($potentialIDs | Where-Object {$_ -match '^[0-9A-F]{4}$'} | ForEach-Object {$_.ToUpper()} | Select-Object -First 1)
+                    $item.Make = $make
+                    $item.Model = $model
+                    $item.Product = "$make $model"
+                    $item.Baseboard = $baseboard
 
                     $key = "$make|$model"
                     if (-not $devicePairs.ContainsKey($key)) {
@@ -2359,6 +2367,18 @@ function Get-DATConfigMgrKnownModels {
         }
     }
 
+    $baseboardDictionary = [ordered]@{}
+    $baseboardProducts = @($cmSystemResources.Values | Sort-Object Make,Baseboard | Select-Object Baseboard,Product)
+    $baseboardGroups = @($baseboardProducts | Where-Object {-not [string]::IsNullOrEmpty($_.Baseboard) } | Group-Object Baseboard)
+    foreach ($baseboardGroup in $baseboardGroups) {
+        $baseboardID = "$($baseboardGroup.Name)"
+        $baseboardModels = @($baseboardGroup.Group.Product | Group-Object | Sort-Object Count -Descending | ForEach-Object {[PSCustomObject]@{ID=$baseboardID;Name="$($_.Name)";Count=$($_.Count);}})
+        $baseboardDictionary[$baseboardID] = [PSCustomObject]@{Count=$($baseboardGroup.Count);Models=$baseboardModels;}
+        $baseboardJsonString = "{`"$baseboardID`":{$($baseboardDictionary[$baseboardID] | ConvertTo-Json -Compress)}}"
+        #Write-DATLogEntry -Value "[ConfigMgr Known Models] $baseboardJsonString" -Severity $(if ($baseboardModels.Count -gt 1) {2} else {1})
+        if ($baseboardModels.Count -gt 1) {Write-DATLogEntry -Value "[ConfigMgr Known Models] $baseboardJsonString" -Severity 2}
+    }
+    #$devices = @($devicePairs.Values | Sort-Object -Property Make, Family, Baseboard, Model) # family sort placeholder
     $devices = @($devicePairs.Values | Sort-Object -Property Make, Model)
     $uniqueMakes = @($devices | Select-Object -ExpandProperty Make -Unique)
     $uniqueModels = @($devices | Select-Object -ExpandProperty Model -Unique)
@@ -2369,8 +2389,63 @@ function Get-DATConfigMgrKnownModels {
     return [PSCustomObject]@{
         Makes   = [string[]]$uniqueMakes
         Models  = [string[]]$uniqueModels
+        Baseboards = $baseboardDictionary
         Devices = $devices
     }
+}
+
+function Get-DATConfigMgrPkgProperties {
+    param (
+        [array]$Baseboards,
+        [object]$ReleaseDate
+    )
+    $pkgProperties = [ordered]@{Name=$null;Description=$null;}
+    $regJSONDescriptions = (Get-ItemProperty -Path $global:RegPath -Name 'JsonDescriptions' -ErrorAction SilentlyContinue).JsonDescriptions
+    $regJSONKnownSystems = (Get-ItemProperty -Path $global:RegPath -Name 'JsonKnownSystems' -ErrorAction SilentlyContinue).JsonKnownSystems
+    if (-not $regJSONDescriptions) {
+        Write-DATLogEntry -Value "[PkgProperties] JsonDescriptions disabled" -Severity 1
+    } else {
+        Write-DATLogEntry -Value "[PkgProperties] JsonDescriptions enabled - Seeding Package Description with Baseboard IDs" -Severity 1
+        $description = [ordered]@{IDs=$Baseboards}
+        if (-not $regJSONKnownSystems) {
+            Write-DATLogEntry -Value "[PkgProperties] JsonKnownSystems disabled - Keeping Baseboard IDs" -Severity 1
+        } elseif ([string]::IsNullOrEmpty($global:ConfigMgrKnownBaseboards)) {
+            Write-DATLogEntry -Value "[PkgProperties] ConfigMgrKnownBaseboards is null - Keeping Baseboard IDs" -Severity 2
+        } else {
+            Write-DATLogEntry -Value "[PkgProperties] ConfigMgrKnownBaseboards defined - Getting Baseboard Counts" -Severity 1
+            $baseboardModels = @($Baseboards | ForEach-Object {$global:ConfigMgrKnownBaseboards["$_"].Models} | Where-Object {$null -ne $_})
+            if ($baseboardModels.Count -le 0) {
+                Write-DATLogEntry -Value "[PkgProperties] No ConfigMgrKnownBaseboards Found" -Severity 2
+            } elseif ($baseboardModels.Count -eq 1) {
+                $pkgProperties.Name = $baseboardModels[0].Name
+                $description = [ordered]@{IDs=@{"$($baseboardModels[0].ID)"=$baseboardModels[0].Count}}
+                $pkgProperties.Description = $($description | ConvertTo-Json -Compress -Depth 4)
+                Write-DATLogEntry -Value "[PkgProperties] Single Baseboard Model : $($pkgProperties | ConvertTo-Json -Compress -Depth 4)" -Severity 1
+            } else {
+                # Determine package name — model name with highest sum of counts
+                $pkgProperties.Name = $baseboardModels | Group-Object -Property Name |
+                    ForEach-Object {[PSCustomObject]@{Name=$_.Name;Total=($_.Group | Measure-Object -Property Count -Sum).Sum}} |
+                    Sort-Object -Property Total -Descending | Select-Object -First 1 -ExpandProperty Name
+                # Build baseboard dictionary
+                $baseboardDictionary = [ordered]@{}
+                foreach ($id in $Baseboards) {
+                    $baseboardConfigMgr = $global:ConfigMgrKnownBaseboards["$id"]
+                    if ($null -ne $baseboardConfigMgr.Models) {
+                        $modelDictionary = [ordered]@{}
+                        $baseboardConfigMgr.Models | ForEach-Object {$modelDictionary["$($_.Name)"] = $_.Count}
+                        $baseboardDictionary["$id"] = $modelDictionary
+                        Write-DATLogEntry -Value "[PkgProperties] Set '$id' to $($modelDictionary | ConvertTo-Json -Compress -Depth 4)" -Severity 1
+                    }
+                }
+                $description = [ordered]@{IDs=$baseboardDictionary}
+            }
+        }
+        if (-not [string]::IsNullOrEmpty($ReleaseDate)){
+            $description.ReleaseDate = try { ([datetime]$ReleaseDate).ToString('yyyyMMdd') } catch { $ReleaseDate }
+        }
+        $pkgProperties.Description = $($description | ConvertTo-Json -Compress -Depth 4)
+    }
+    return $pkgProperties
 }
 
 function Get-DATDistributionPoints {
@@ -2442,6 +2517,14 @@ function New-DATConfigMgrPkg {
         } else {
             "Models included: $Baseboards"
         }
+
+        # Set Package Name and Description from Known System information
+        $pkgPropertiesParams = [ordered]@{Baseboards=@($Baseboards -split '\W' | ForEach-Object {"$_".Trim().ToUpper()})}
+        if ($PackageType -eq 'BIOS' -and -not [string]::IsNullOrEmpty($ReleaseDate)) {$pkgPropertiesParams.ReleaseDate = $ReleaseDate}
+        $pkgProperties = Get-DATConfigMgrPkgProperties @pkgPropertiesParams
+        Write-DATLogEntry -Value "- [ConfigMgr] Known System Package Properties : $($pkgProperties | ConvertTo-Json -Compress -Depth 4)" -Severity 1
+        if (-not [string]::IsNullOrEmpty($pkgProperties.Name)) {$CMPackage = $CMPackage -replace "$OEM $Model",$pkgProperties.Name}
+        if (-not [string]::IsNullOrEmpty($pkgProperties.Description)) {$pkgDescription = $pkgProperties.Description}
 
         # --- Stage 1: Check existing package via WMI before copying files ---
         Write-DATLogEntry -Value "- [ConfigMgr] Checking for existing package: $CMPackage (version $Version)" -Severity 1
@@ -2963,6 +3046,16 @@ function Start-DATModelProcessing {
         $wimFinalDir    = Join-Path $PackagePath "$oem\$modelName\$($os.Compact)-$arch-$defaultVersion"
         $wimFinalPath   = Join-Path $PackagePath "$oem\$modelName\$($os.Compact)-$arch-$defaultVersion\DriverPackage.wim"
         $dlDestDir      = Join-Path $StoragePath "$oem\$modelName"
+
+        # Tests Get-DATConfigMgrPkgProperties
+        $pkgPropertyDebugging = $false
+        if ($pkgPropertyDebugging) {
+            $pkgPropertiesParams = [ordered]@{Baseboards=@($baseboards -split '\W' | ForEach-Object {"$_".Trim().ToUpper()})}
+            if ($PackageType -eq 'BIOS' -and -not [string]::IsNullOrEmpty($ReleaseDate)) {$pkgPropertiesParams.ReleaseDate = $ReleaseDate}
+            $pkgProperties = Get-DATConfigMgrPkgProperties @pkgPropertiesParams
+            Write-DATLogEntry -Value "[$currentIndex/$totalModels] Known System Package Properties : $($pkgProperties | ConvertTo-Json -Compress -Depth 4)" -Severity 2
+            continue
+        }
 
         try {
             # ── Driver processing (when PackageType is 'Drivers' or 'All') ──────────

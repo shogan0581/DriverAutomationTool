@@ -6540,7 +6540,7 @@ $btn_Build.Add_Click({
     $script:BuildPS = [powershell]::Create()
     $script:BuildPS.Runspace = $script:BuildRunspace
     [void]$script:BuildPS.AddScript({
-        param($ModulePath, $ScriptDir, $RegPath, $RunningMode, $SelectedModels, $StoragePath, $PackagePath, $IntuneToken, $IntuneRefreshTok, $IntuneAuthClientIdParam, $IntuneTokenExpSec, $DisableToast, $SiteServer, $SiteCode, $PackageType, $DPGroups, $DPs, $DistPriority, $EnableBDR, $DebugBuildPath, $CustomBrandingPath, $HPPasswordBinPath, $ToastTimeoutAction, $MaxDeferrals, $BIOSRestartDelayMinutes, $TeamsWebhookUrl, $TeamsNotificationsEnabled, $CustomToastTextsJson)
+        param($ModulePath, $ScriptDir, $RegPath, $RunningMode, $SelectedModels, $StoragePath, $PackagePath, $IntuneToken, $IntuneRefreshTok, $IntuneAuthClientIdParam, $IntuneTokenExpSec, $DisableToast, $SiteServer, $SiteCode, $PackageType, $DPGroups, $DPs, $DistPriority, $EnableBDR, $ConfigMgrKnownBaseboards, $DebugBuildPath, $CustomBrandingPath, $HPPasswordBinPath, $ToastTimeoutAction, $MaxDeferrals, $BIOSRestartDelayMinutes, $TeamsWebhookUrl, $TeamsNotificationsEnabled, $CustomToastTextsJson)
         try {
         Import-Module $ModulePath -Force
         $procParams = @{
@@ -6668,6 +6668,7 @@ $btn_Build.Add_Click({
     [void]$script:BuildPS.AddArgument($cmDistPriority)
     $cmEnableBDR = ($chk_BinaryDiffReplication.IsChecked -eq $true)
     [void]$script:BuildPS.AddArgument($cmEnableBDR)
+    [void]$script:BuildPS.AddArgument($script:ConfigMgrKnownBaseboards)
     [void]$script:BuildPS.AddArgument($debugBuildPath)
     [void]$script:BuildPS.AddArgument($script:CustomBrandingImagePath)
     [void]$script:BuildPS.AddArgument($script:HPPasswordBinPath)
@@ -7711,6 +7712,7 @@ function Invoke-DATConfigMgrKnownModelLookup {
 
             $script:ConfigMgrKnownMakes = $result.Makes
             $script:ConfigMgrKnownModels = $result.Models
+            $script:ConfigMgrKnownBaseboards = $result.Baseboards
             $script:ConfigMgrKnownDevices = $result.Devices
 
             Write-DATActivityLog "ConfigMgr known model lookup complete: $makeCount makes, $modelCount models" -Level Success
@@ -7719,7 +7721,7 @@ function Invoke-DATConfigMgrKnownModelLookup {
             foreach ($makeGrp in $devicesByMake) {
                 Write-DATActivityLog "  $($makeGrp.Name): $($makeGrp.Count) model(s)" -Level Info
                 foreach ($dev in ($makeGrp.Group | Sort-Object Model)) {
-                    Write-DATActivityLog "    - $($dev.Model)" -Level Info
+                    #Write-DATActivityLog "    - $($dev.Model)" -Level Info
                 }
             }
 
