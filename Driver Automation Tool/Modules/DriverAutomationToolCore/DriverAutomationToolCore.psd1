@@ -24,6 +24,7 @@
         'Connect-DATConfigMgr',
         'ConvertTo-DATNormalizedMake',
         'ConvertTo-DATNormalizedModel',
+        'Get-DATConfigMgrPkgProperties',
         'Get-DATConfigMgrKnownModels',
         'Get-DATSiteCode',
         'Get-DATDistributionPoints',

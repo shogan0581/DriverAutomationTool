@@ -2142,7 +2142,7 @@ function ConvertTo-DATNormalizedModel {
         $m = $m -replace 'Mobile Workstation.*','MWS'
         $m = $m -replace 'Notebook','NB'
         # remove specific strings
-        $m = $m -replace '\s*[\d\.]{2,}\D?inch\b',''  # e.g. 12 inch, 13-inch, 15.6 inch
+        #$m = $m -replace '\s*[\d\.]{2,}\D?inch\b',''  # e.g. 12 inch, 13-inch, 15.6 inch
         $m = $m -replace '\s*Base Model\b',''
         # remove specific strings and anything after
         #$m = $m -replace '\s*35W$',''           # upstream - 35W suffix only
@@ -2221,12 +2221,16 @@ function Get-DATConfigMgrKnownModels {
             csModel = $null
             bbManufacturer = $null
             bbProduct = $null
+            siBiosVersion = $null
             siSystemFamily = $null
             siSystemSKU = $null
             Make = $null
             Model = $null
             Product = $null
             Baseboard = $null
+            BiosFamily = $null
+            ModelFamily = $null
+            SystemFamily = $null
         }
         $cmSystemResources = @{}
         try {
@@ -2239,7 +2243,7 @@ function Get-DATConfigMgrKnownModels {
             # Attempt MS_SYSTEMINFORMATION query. Most comprehensive management instance but not present by default for client hardware inventory.
             $cmSystemInformation = try {
                 @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
-                    -Query "SELECT DISTINCT ResourceID, SystemManufacturer, SystemProductName, BaseBoardManufacturer, BaseBoardProduct, SystemFamily, SystemSKU FROM SMS_G_System_MS_SYSTEMINFORMATION")
+                    -Query "SELECT DISTINCT ResourceID, SystemManufacturer, SystemProductName, BaseBoardManufacturer, BaseBoardProduct, BIOSVersion, SystemFamily, SystemSKU FROM SMS_G_System_MS_SYSTEMINFORMATION")
             } catch {
                 Write-DATLogEntry -Value "[ConfigMgr Known Models] MS_SYSTEMINFORMATION query issue: $($_.Exception.Message)" -Severity 2
             }
@@ -2252,6 +2256,7 @@ function Get-DATConfigMgrKnownModels {
                         $cmSystemResources[$ResourceID].csModel = ([string]$r.SystemProductName).Trim()
                         $cmSystemResources[$ResourceID].bbManufacturer = ([string]$r.BaseBoardManufacturer).Trim()
                         $cmSystemResources[$ResourceID].bbProduct = ([string]$r.BaseBoardProduct).Trim()
+                        $cmSystemResources[$ResourceID].siBiosVersion = ([string]$r.BIOSVersion).Trim()
                         $cmSystemResources[$ResourceID].siSystemFamily = ([string]$r.SystemFamily).Trim()
                         $cmSystemResources[$ResourceID].siSystemSKU = ([string]$r.SystemSKU).Trim()
                     }
@@ -2285,7 +2290,6 @@ function Get-DATConfigMgrKnownModels {
                     }
                 }
                 # Attempt System Family query from COMPUTER_SYSTEM.
-                <# Placeholder for potential future use
                 $cmComputerSystem = try {
                     @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
                         -Query "SELECT DISTINCT ResourceID, SystemFamily FROM SMS_G_System_COMPUTER_SYSTEM")
@@ -2298,7 +2302,6 @@ function Get-DATConfigMgrKnownModels {
                         $cmSystemResources[$ResourceID].siSystemFamily = ([string]$r.SystemFamily).Trim()
                     }
                 }
-                #>
                 # Attempt BASEBOARD query
                 $cmBaseBoard = try {
                     @(Get-CimInstance -CimSession $cimSession -Namespace $namespace `
@@ -2329,10 +2332,35 @@ function Get-DATConfigMgrKnownModels {
                     if ([string]::IsNullOrEmpty($model)) { continue }
                     $potentialIDs = @($item.bbProduct,$item.siSystemSKU,$(@($item.siSystemSKU -split 'SKU=([0-9A-F]{4});')[1]),$(try {$item.csModel.SubString(0,4)} catch {}))
                     $baseboard = $($potentialIDs | Where-Object {$_ -match '^[0-9A-F]{4}$'} | ForEach-Object {$_.ToUpper()} | Select-Object -First 1)
+                    # Get/Set BIOS, Model and System Families - facilitates intra-OEM pre-sorting
+                    $biosFamily, $modelFamily, $systemFamily = $null, $null, $null
+                    if (($make -eq 'HP') -and ($item.siBiosVersion -match '^([A-Z]+\d+|\d+[A-Z]+)')) {
+                        $biosFamily = "$(@($item.siBiosVersion -split '^([A-Z]+\d+|\d+[A-Z]+)')[1])".ToUpper()
+                    }
+                    if ($model -match '(Elite|Pro|Z)(Book|Book x2|Book x360|Desk|One| x2| x360)') {
+                        $modelFamily = @($model -split '(Elite|Pro|Z)(Book|Book x2|Book x360|Desk|One| x2| x360)')[1..2] -join ''
+                    } elseif ($model -match '(Elite|Pro).*(Desktop|CMT|SFF|TWR|USDT)') {
+                        $modelFamily = "$(@($model -split  '(Elite|Pro)')[1])Desk"
+                    } elseif ($model -match '(Optiplex|Latitude|Precision|Vostro|Inspiron|PowerEdge)') {
+                        $modelFamily = @($model -split '(Optiplex|Latitude|Precision|Vostro|Inspiron|PowerEdge)')[1]
+                    }
+                    switch -regex ($item.siSystemFamily) {
+                        '103C_\w{6} HP ' {$systemFamily = @($item.siSystemFamily -split '103C_\w{6} HP ')[-1].Trim();break;}
+                        '^103C_5336AN' {$systemFamily = 'EliteBook';break;}
+                        '^103C_53307F' {$systemFamily = 'EliteDesk';break;}
+                        '^103C_53335X' {$systemFamily = 'Workstation';break;}
+                        '\w' {$systemFamily = $item.siSystemFamily -replace "^($($make)|$($item.csManufacturer)|$($item.bbManufacturer))\s*","";break;}
+                    }
+                    # Set devicePair family to valid model or system family
+                    $family = @("$modelFamily", "$systemFamily") | Where-Object {$_ -notmatch '^(Default|To be|$)'} | Select-Object -First 1
+
                     $item.Make = $make
                     $item.Model = $model
                     $item.Product = "$make $model"
                     $item.Baseboard = $baseboard
+                    $item.BiosFamily = $biosFamily
+                    $item.ModelFamily = $modelFamily
+                    $item.SystemFamily = $systemFamily
 
                     $key = "$make|$model"
                     if (-not $devicePairs.ContainsKey($key)) {
@@ -2340,11 +2368,23 @@ function Get-DATConfigMgrKnownModels {
                             Make      = $make
                             Model     = $model
                             Baseboard = $baseboard   # $null if class not collected
-                            #Family = $family # family placeholder
+                            Family    = $family
+                            BIOS      = $biosFamily
                         }
-                    } elseif ($null -ne $baseboard -and $null -eq $devicePairs[$key].Baseboard) {
-                        # Enrich existing entry with baseboard if we now have one
-                        $devicePairs[$key].Baseboard = $baseboard
+                    } else {
+                        # Enrich existing entries with baseboard, family and BIOS
+                        if ($baseboard -and -not($devicePairs[$key].Baseboard)) {
+                            Write-DATLogEntry -Value "[ConfigMgr Known Models] updating $key Baseboard to $baseboard" -Severity 2
+                            $devicePairs[$key].Baseboard = $baseboard
+                        }
+                        if ($family -and -not($devicePairs[$key].family)) {
+                            Write-DATLogEntry -Value "[ConfigMgr Known Models] updating $key Family to $family" -Severity 2
+                            $devicePairs[$key].Family = $family
+                        }
+                        if ($biosFamily -and -not($devicePairs[$key].BIOS)) {
+                            Write-DATLogEntry -Value "[ConfigMgr Known Models] updating $key BIOS to $biosFamily" -Severity 2
+                            $devicePairs[$key].BIOS = $biosFamily
+                        }
                     }
                 }
                 Write-DATLogEntry -Value "[ConfigMgr Known Models] Normalization complete" -Severity 1
@@ -2378,8 +2418,9 @@ function Get-DATConfigMgrKnownModels {
         #Write-DATLogEntry -Value "[ConfigMgr Known Models] $baseboardJsonString" -Severity $(if ($baseboardModels.Count -gt 1) {2} else {1})
         if ($baseboardModels.Count -gt 1) {Write-DATLogEntry -Value "[ConfigMgr Known Models] $baseboardJsonString" -Severity 2}
     }
-    #$devices = @($devicePairs.Values | Sort-Object -Property Make, Family, Baseboard, Model) # family sort placeholder
-    $devices = @($devicePairs.Values | Sort-Object -Property Make, Model)
+    $count = @{n="Count";e={$mk,$md=$_.Make,$_.Model;@($cmSystemResources.Values | Where-Object {$_.Make -eq $mk -and $_.Model -eq $md}).Count}}
+    $devices = @($devicePairs.Values | Sort-Object -Property Make, BIOS, Family, Baseboard, Model | Select-Object $count,*)
+    #$devices = @($devicePairs.Values | Sort-Object -Property Make, Model)
     $uniqueMakes = @($devices | Select-Object -ExpandProperty Make -Unique)
     $uniqueModels = @($devices | Select-Object -ExpandProperty Model -Unique)
 

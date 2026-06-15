@@ -5162,13 +5162,14 @@ $grid_Models.Add_SelectionChanged({
     if (-not $isKnown -and $script:ConfigMgrKnownDevices -and @($script:ConfigMgrKnownDevices).Count -gt 0) {
         foreach ($device in $script:ConfigMgrKnownDevices) {
             if (Test-DATKnownDeviceMatch -GridMake $gridMake -GridModel $gridModel -GridBaseboards $item.Baseboards `
-                    -DeviceMake $device.Make -DeviceModel $device.Model -DeviceBaseboard $device.Baseboard) {
+                    -DeviceMake $device.Make -DeviceModel $device.Model -DeviceBaseboard $device.Baseboard -Both) {
                 $isKnown = $true; break
             }
         }
     }
     if ($isKnown) {
         $txt_ModelDetail_KnownModel.Text       = 'Yes'
+        $txt_ModelDetail_KnownModel.Text       = if ([string]::IsNullOrEmpty($script:KnownModelText)) {'Yes'} else {$script:KnownModelText}
         $txt_ModelDetail_KnownModel.Foreground = [System.Windows.Media.SolidColorBrush]::new(
             [System.Windows.Media.ColorConverter]::ConvertFromString(
                 (Get-DATTheme -ThemeName $script:CurrentTheme)['StatusSuccess']))
@@ -6117,7 +6118,7 @@ $txt_ModelSearch.Add_TextChanged({
 
 $btn_SelectKnownModels = $Window.FindName('btn_SelectKnownModels')
 
-function Test-DATKnownDeviceMatch {
+function Test-DATKnownDeviceMatch_Legacy {
     <#
     .SYNOPSIS
         Returns $true when a catalog grid item matches a known device.
@@ -6149,6 +6150,129 @@ function Test-DATKnownDeviceMatch {
     $normDeviceMake  = ConvertTo-DATNormalizedMake  -Make $DeviceMake
     $normDeviceModel = ConvertTo-DATNormalizedModel -Make $DeviceMake -Model $DeviceModel
     return ($GridModel -eq $normDeviceModel -or "$GridMake|$GridModel" -eq "$normDeviceMake|$normDeviceModel")
+}
+
+function Test-DATKnownDeviceMatch {
+    <#
+    .SYNOPSIS
+        Returns $true when a catalog grid item matches a known device.
+        Baseboard is the primary match when available on both sides;
+        name-based matching is used as a fallback.
+    #>
+    param (
+        [string]$GridMake,
+        [string]$GridModel,
+        [string]$GridBaseboards,   # comma-separated catalog baseboard IDs
+        [string]$DeviceMake,
+        [string]$DeviceModel,
+        [string]$DeviceBaseboard,   # single baseboard value from inventory ($null if not collected)
+        [switch]$Both
+    )
+    # --- Makes must match ---
+    if ($DeviceMake -ne $GridMake) { return $false }
+
+    # --- Baseboard-primary match ---
+    # Only attempt if the inventory device has a baseboard value AND the catalog
+    # entry has at least one baseboard value. Both sides must be non-empty.
+    $boardMatch = $false
+    if (-not [string]::IsNullOrWhiteSpace($DeviceBaseboard) -and -not [string]::IsNullOrWhiteSpace($GridBaseboards)) {
+        $deviceBoard = $DeviceBaseboard.Trim().ToUpper()
+        $catalogBoards = $GridBaseboards -split '[,;\s]+' | ForEach-Object { $_.Trim().ToUpper() } | Where-Object { $_ }
+        $boardMatch = ($catalogBoards -contains $deviceBoard)
+    }
+
+    # --- Return when neither model or board match ---
+    $modelMatch = (($GridModel -eq $DeviceModel) -or ("$GridMake|$GridModel" -eq "$DeviceMake|$DeviceModel"))
+    if (-not $modelMatch -and -not $boardMatch) { return $false }
+
+    # --- Return when both model and board match ---
+    $baseboardModels = [array]@($catalogBoards | ForEach-Object {$script:ConfigMgrKnownBaseboards[$_].Models})
+    $baseboardSum = ($baseboardModels | ForEach-Object {$_.Count} | Measure-Object -Sum).Sum
+    if ($modelMatch -and $boardMatch) {
+        $script:KnownModelText = "Yes: $baseboardSum ($DeviceModel)"
+        return $true
+    }
+
+    # --- Determine output and UI text when either model or board match
+    foreach ($id in $catalogBoards) {
+        $known = $script:ConfigMgrKnownBaseboards[$id]
+        if ($null -ne $known) {
+            Write-DATLogEntry "[Get Model Text] '$id' $($known | ConvertTo-Json -Compress) from $GridBaseboards/$GridModel" -Severity 2
+        }
+    }
+    #$deviceMatch = if (($boardMatch -or $modelMatch) -and ($catalogBoards.Count -eq 1))
+    $yn = if ($Both) {'No'} else {'Yes'}
+    $script:KnownModelText = "$yn`: $baseboardSum ($deviceBoard/$DeviceModel)"
+
+    # --- Return when either model or board match ---
+    return [bool](-not $Both)
+}
+
+function Get-DATKnownDeviceMatch {
+    <#
+    .SYNOPSIS
+        Returns $true/$false for default Make/Model matching. 
+        Returns Known Model text when baseboards match. 
+    #>
+    param (
+        [string]$GridMake,
+        [string]$GridModel,
+        [string]$GridBaseboards,   # comma-separated catalog baseboard IDs
+        [string]$DeviceMake,
+        [string]$DeviceModel,
+        [string]$DeviceBaseboard   # single baseboard value from inventory ($null if not collected)
+    )
+    # --- Normalize Makes ---
+    #$normGridMake  = ConvertTo-DATNormalizedMake  -Make $GridMake
+    #$normDeviceMake  = ConvertTo-DATNormalizedMake  -Make $DeviceMake
+    if ($GridMake -ne $DeviceMake) {return $false}
+
+    # --- Normalize Models ---
+    $normGridModel = ConvertTo-DATNormalizedModel -Make $GridMake -Model $GridModel
+    $normDeviceModel = ConvertTo-DATNormalizedModel -Make $DeviceMake -Model $DeviceModel
+
+    # --- Baseboard-primary match ---
+    # Only attempt if the inventory device has a baseboard value AND the catalog
+    # entry has at least one baseboard value. Both sides must be non-empty.
+    if (-not [string]::IsNullOrWhiteSpace($DeviceBaseboard) -and -not [string]::IsNullOrWhiteSpace($GridBaseboards)) {
+        $deviceBoard = $DeviceBaseboard.Trim().ToUpper()
+        $catalogBoards = $GridBaseboards -split '[,;\s]+' | ForEach-Object { $_.Trim().ToUpper() } | Where-Object { $_ }
+        if ($catalogBoards -notcontains $deviceBoard) {
+            return "No: $deviceBoard/$normDeviceModel"
+        } else {
+            $baseboardModels = [array]@($catalogBoards | ForEach-Object {$script:ConfigMgrKnownBaseboards[$_].Models})
+            $baseboardSum = ($baseboardModels | ForEach-Object {$_.Count} | Measure-Object -Sum).Sum
+            if ($normGridModel -eq $normDeviceModel) {
+                return "Yes: $($baseboardSum) ($normDeviceModel)"
+            } else {
+                foreach ($id in $catalogBoards) {
+                    $known = $script:ConfigMgrKnownBaseboards[$id]
+                    if ($null -ne $known) {
+                        Write-DATLogEntry "[Get Model Text] '$id' $($known | ConvertTo-Json -Compress)" -Severity 2
+                    }
+                }
+                return "Maybe: See Logs"
+            }
+            <#
+            $baseboardCounts = @($catalogBoards | ForEach-Object {$script:ConfigMgrKnownBaseboards[$_].Count})
+            $baseboardSum = ($baseboardCounts | Measure-Object -Sum).Sum
+            if ($normGridModel -eq $normDeviceModel) {
+                return "Yes: $baseboardSum"
+            } else {
+                foreach ($id in $catalogBoards) {
+                    $known = $script:ConfigMgrKnownBaseboards[$id]
+                    if ($null -ne $known) {
+                        Write-DATLogEntry "[Get Model Text] '$id' $($known | ConvertTo-Json -Compress)" -Severity 2
+                    }
+                }
+                return "Maybe: $baseboardSum"
+            }
+            #>
+        }
+    }
+
+    # --- Name-based fallback ---
+    return (($normGridModel -eq $normDeviceModel) -or ("$GridMake|$normGridModel" -eq "$DeviceMake|$normDeviceModel"))
 }
 
 function Update-DATSelectKnownModelsVisibility {
@@ -6188,7 +6312,7 @@ $btn_SelectKnownModels.Add_Click({
                 $gridModel = ConvertTo-DATNormalizedModel -Make $item.OEM -Model $item.Model
                 foreach ($device in $script:ConfigMgrKnownDevices) {
                     if (Test-DATKnownDeviceMatch -GridMake $gridMake -GridModel $gridModel -GridBaseboards $item.Baseboards `
-                            -DeviceMake $device.Make -DeviceModel $device.Model -DeviceBaseboard $device.Baseboard) {
+                            -DeviceMake $device.Make -DeviceModel $device.Model -DeviceBaseboard $device.Baseboard -Both) {
                         $item.Selected = $true; break
                     }
                 }
@@ -7605,13 +7729,14 @@ function Update-DATConfigMgrKnownModelSelection {
     #>
     if (-not $script:ConfigMgrKnownDevices -or $script:ModelData.Count -eq 0) { return }
 
+    Write-DATActivityLog "Checking for models matching known ConfigMgr devices" -Level Success
     $matchCount = 0
     foreach ($item in $script:ModelData) {
         $gridMake  = ConvertTo-DATNormalizedMake  -Make $item.OEM
         $gridModel = ConvertTo-DATNormalizedModel -Make $item.OEM -Model $item.Model
         foreach ($device in $script:ConfigMgrKnownDevices) {
             if (Test-DATKnownDeviceMatch -GridMake $gridMake -GridModel $gridModel -GridBaseboards $item.Baseboards `
-                    -DeviceMake $device.Make -DeviceModel $device.Model -DeviceBaseboard $device.Baseboard) {
+                    -DeviceMake $device.Make -DeviceModel $device.Model -DeviceBaseboard $device.Baseboard -Both) {
                 $item.Selected = $true
                 $matchCount++
                 break
@@ -7782,10 +7907,18 @@ function Show-DATConfigMgrKnownModelsDialog {
     $mainPanel.RowDefinitions.Add($row2)
 
     $headerGrid = [System.Windows.Controls.Grid]::new()
-    $hCol1 = [System.Windows.Controls.ColumnDefinition]::new(); $hCol1.Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+    $hCol1 = [System.Windows.Controls.ColumnDefinition]::new(); $hCol1.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
     $hCol2 = [System.Windows.Controls.ColumnDefinition]::new(); $hCol2.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
+    $hCol3 = [System.Windows.Controls.ColumnDefinition]::new(); $hCol3.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
+    $hCol4 = [System.Windows.Controls.ColumnDefinition]::new(); $hCol4.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
+    $hCol5 = [System.Windows.Controls.ColumnDefinition]::new(); $hCol5.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
+    $hCol6 = [System.Windows.Controls.ColumnDefinition]::new(); $hCol6.Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
     $headerGrid.ColumnDefinitions.Add($hCol1)
     $headerGrid.ColumnDefinitions.Add($hCol2)
+    $headerGrid.ColumnDefinitions.Add($hCol3)
+    $headerGrid.ColumnDefinitions.Add($hCol4)
+    $headerGrid.ColumnDefinitions.Add($hCol5)
+    $headerGrid.ColumnDefinitions.Add($hCol6)
 
     $titleText = [System.Windows.Controls.TextBlock]::new()
     $titleText.FontSize = 16
@@ -7824,8 +7957,12 @@ function Show-DATConfigMgrKnownModelsDialog {
     $items = [System.Collections.ObjectModel.ObservableCollection[PSObject]]::new()
     foreach ($device in $script:ConfigMgrKnownDevices) {
         $items.Add([PSCustomObject]@{
+            Count = $device.Count
             Make  = $device.Make
             Model = $device.Model
+            BIOS = $device.BIOS
+            Family = $device.Family
+            Baseboard = $device.Baseboard
         })
     }
 
@@ -7871,8 +8008,12 @@ function Show-DATConfigMgrKnownModelsDialog {
         </Style>
     </DataGrid.CellStyle>
     <DataGrid.Columns>
-        <DataGridTextColumn Header="Make" Width="*" Binding="{Binding Make}"/>
-        <DataGridTextColumn Header="Model" Width="2*" Binding="{Binding Model}"/>
+        <DataGridTextColumn Header="Count" Width="Auto" Binding="{Binding Count}"/>
+        <DataGridTextColumn Header="Make" Width="Auto" Binding="{Binding Make}"/>
+        <DataGridTextColumn Header="BIOS" Width="Auto" Binding="{Binding BIOS}"/>
+        <DataGridTextColumn Header="Family" Width="Auto" Binding="{Binding Family}"/>
+        <DataGridTextColumn Header="Baseboard" Width="Auto" Binding="{Binding Baseboard}"/>
+        <DataGridTextColumn Header="Model" Width="*" Binding="{Binding Model}"/>
     </DataGrid.Columns>
 </DataGrid>
 "@
@@ -7890,10 +8031,18 @@ function Show-DATConfigMgrKnownModelsDialog {
     $mainPanel.Children.Add($dgBorder) | Out-Null
 
     $footerGrid = [System.Windows.Controls.Grid]::new()
-    $fCol1 = [System.Windows.Controls.ColumnDefinition]::new(); $fCol1.Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+    $fCol1 = [System.Windows.Controls.ColumnDefinition]::new(); $fCol1.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
     $fCol2 = [System.Windows.Controls.ColumnDefinition]::new(); $fCol2.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
+    $fCol3 = [System.Windows.Controls.ColumnDefinition]::new(); $fCol3.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
+    $fCol4 = [System.Windows.Controls.ColumnDefinition]::new(); $fCol4.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
+    $fCol5 = [System.Windows.Controls.ColumnDefinition]::new(); $fCol5.Width = [System.Windows.GridLength]::new(0, [System.Windows.GridUnitType]::Auto)
+    $fCol6 = [System.Windows.Controls.ColumnDefinition]::new(); $fCol6.Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
     $footerGrid.ColumnDefinitions.Add($fCol1)
     $footerGrid.ColumnDefinitions.Add($fCol2)
+    $footerGrid.ColumnDefinitions.Add($fCol3)
+    $footerGrid.ColumnDefinitions.Add($fCol4)
+    $footerGrid.ColumnDefinitions.Add($fCol5)
+    $footerGrid.ColumnDefinitions.Add($fCol6)
 
     $summaryText = [System.Windows.Controls.TextBlock]::new()
     $summaryText.Text = "$makeCount makes, $deviceCount unique models from hardware inventory"
